@@ -12,10 +12,3 @@ export const FLOW_SIGNAL_ICON_OPTIONS = [
 ];
 
 export const FLOW_SIGNAL_ICON_IDS = new Set(FLOW_SIGNAL_ICON_OPTIONS.map(option => option.id));
-
-export const DEFAULT_FLOW_SIGNALS = [
-  { id: 'finish', label: '곡 마침', shortLabel: '곡 마침', icon: 'circle-stop', color: '#fca5a5', sortOrder: 10 },
-  { id: 'restart', label: '처음으로 돌아가기', shortLabel: '처음으로', icon: 'rotate-ccw', color: '#93c5fd', sortOrder: 20 },
-  { id: 'chorus', label: '후렴으로 돌아가기', shortLabel: '후렴으로', icon: 'repeat-2', color: '#c4b5fd', sortOrder: 30 },
-  { id: 'interlude', label: '간주 넣기', shortLabel: '간주 넣기', icon: 'music-2', color: '#86efac', sortOrder: 40 },
-];

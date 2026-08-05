@@ -5,7 +5,7 @@ const VALID_MODES = new Set(['regular', 'event']);
 
 const normalizeSystem = row => ({
   churchName: row?.churchName || '',
-  defaultServiceType: String(row?.defaultServiceType || 'sunday-morning'),
+  defaultServiceType: String(row?.defaultServiceType || ''),
 });
 
 const normalizePreferences = row => ({

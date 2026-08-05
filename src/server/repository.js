@@ -260,7 +260,7 @@ export async function saveConti(conti, actor) {
         conti.mode === 'event' ? conti.eventId : null,
         conti.date,
         TIME_PATTERN.test(String(conti.time || '')) ? conti.time : null,
-        conti.serviceType || (conti.mode === 'event' ? 'event' : 'sunday-morning'),
+        conti.mode === 'event' ? 'event' : conti.serviceType,
         conti.title.trim().slice(0, 255),
         ownership.leader,
         String(conti.memo || ''),
