@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+.env*
+!.env.example
+.openai/
+coverage/
+/storage/
+/uploads/
+/samplePDF/
+/샘플PDF/
+muse-conti*.sql
+chanyang-ieum*.sql
+*.dump
+*.tar.gz

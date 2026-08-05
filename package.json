@@ -1,0 +1,47 @@
+{
+  "name": "chanyang-ieum",
+  "private": true,
+  "version": "1.0.0",
+  "description": "교회 찬양팀을 위한 콘티 관리 및 실시간 진행 공유 웹앱",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mkjang2000/chanyang-ieum.git"
+  },
+  "homepage": "https://github.com/mkjang2000/chanyang-ieum#readme",
+  "bugs": {
+    "url": "https://github.com/mkjang2000/chanyang-ieum/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/vinext.mjs dev --hostname 0.0.0.0",
+    "build": "node scripts/clean.mjs && node scripts/vinext.mjs build && node scripts/postbuild.mjs",
+    "start": "node scripts/start.mjs",
+    "db:migrate": "node scripts/migrate.mjs"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@fontsource/noto-sans-kr": "^5.3.0",
+    "@pdf-lib/fontkit": "^1.1.1",
+    "fonteditor-core": "^2.6.3",
+    "image-size": "^2.0.2",
+    "lucide-react": "^0.468.0",
+    "mysql2": "^3.23.1",
+    "pdf-lib": "^1.17.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-server-dom-webpack": "19.2.8",
+    "sharp": "^0.35.3",
+    "vinext": "0.0.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.1.4",
+    "@vitejs/plugin-rsc": "0.5.30",
+    "vite": "^7.3.1"
+  }
+}

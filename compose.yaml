@@ -1,0 +1,61 @@
+name: chanyang-ieum
+
+services:
+  app:
+    build:
+      context: .
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-3011}:3000"
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      TZ: ${TZ:-Asia/Seoul}
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USER: ${DB_USER:-muse_conti}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env before starting}
+      DB_NAME: ${DB_NAME:-muse_conti}
+      IMAGE_STORAGE_DIR: /data/images
+      KAKAO_REST_API_KEY: ${KAKAO_REST_API_KEY:-}
+      DEBUG_PDF_OCR: ${DEBUG_PDF_OCR:-0}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - image-data:/data/images
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+    stop_grace_period: 20s
+
+  db:
+    image: mariadb:11.4
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      MARIADB_DATABASE: ${DB_NAME:-muse_conti}
+      MARIADB_USER: ${DB_USER:-muse_conti}
+      MARIADB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env before starting}
+      MARIADB_RANDOM_ROOT_PASSWORD: "1"
+    volumes:
+      - database-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 10
+    stop_grace_period: 30s
+
+volumes:
+  database-data:
+  image-data:
