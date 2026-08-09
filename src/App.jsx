@@ -12,22 +12,36 @@ import ContiEditor from './ContiEditor.jsx';
 import DocumentViewer from './DocumentViewer.jsx';
 import { ArchiveModal, EventEditor, LibraryModal, ModalShell } from './AppModals.jsx';
 
+/* 브라우저 임시 저장본을 계정별로 나눠 둔다.
+ *
+ * 키를 계정과 무관하게 쓰면, 공용 태블릿에서 A 가 로그아웃한 뒤 B 가 로그인했을 때
+ * 서버 연결이 실패하는 순간 B 화면에 A 의 콘티가 그대로 뜬다.
+ * key 가 null 이면(=로그인 전) 읽지도 쓰지도 않는다. */
 function usePersistentState(key, initial) {
   const [value, setValue] = useState(initial);
   const [ready, setReady] = useState(false);
   useEffect(() => {
+    if (!key) {
+      setReady(false);
+      return;
+    }
+    let stored = null;
     try {
-      const stored = JSON.parse(localStorage.getItem(key));
-      if (stored) setValue(stored);
-    } catch { /* use the initial demo data */ }
+      stored = JSON.parse(localStorage.getItem(key));
+    } catch { /* 손상된 저장본은 초기값으로 시작한다 */ }
+    // 계정이 바뀌면 이전 계정의 값이 남지 않도록 항상 덮어쓴다.
+    setValue(stored || initial);
     setReady(true);
   }, [key]);
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !key) return;
     try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* uploaded images may exceed browser quota */ }
   }, [key, ready, value]);
   return [value, setValue, ready];
 }
+
+/* 예전 버전이 계정 구분 없이 저장해 둔 값. 로그인 시 한 번 정리한다. */
+const LEGACY_STORAGE_KEYS = ['muse-contis', 'muse-events'];
 
 export default function App() {
   const [auth, setAuth] = useState({ loading: true, setupRequired: false, user: null });
@@ -35,8 +49,9 @@ export default function App() {
   const [selectedDate, setSelectedDate] = useState(TODAY);
   const todayDate = new Date(`${TODAY}T00:00:00`);
   const [calendarMonth, setCalendarMonth] = useState(new Date(todayDate.getFullYear(), todayDate.getMonth(), 1));
-  const [contis, setContis, contisReady] = usePersistentState('muse-contis', []);
-  const [events, setEvents, eventsReady] = usePersistentState('muse-events', []);
+  const storageScope = auth.user?.id || '';
+  const [contis, setContis, contisReady] = usePersistentState(storageScope && `muse-contis:${storageScope}`, []);
+  const [events, setEvents, eventsReady] = usePersistentState(storageScope && `muse-events:${storageScope}`, []);
   const [songs, setSongs] = useState([]);
   const [leaderOptions, setLeaderOptions] = useState([]);
   const [servicePresets, setServicePresets] = useState([]);
@@ -76,6 +91,13 @@ export default function App() {
     try {
       if (localStorage.getItem('muse-sidebar-collapsed') === '1') setSidebarCollapsed(true);
     } catch { /* 저장소를 못 쓰면 기본값(펼침)으로 둔다 */ }
+  }, []);
+
+  // 계정 구분 없이 저장돼 있던 예전 값을 지운다. 남겨두면 다른 계정 사용자가 볼 수 있다.
+  useEffect(() => {
+    try {
+      LEGACY_STORAGE_KEYS.forEach(key => localStorage.removeItem(key));
+    } catch { /* 저장소를 못 써도 진행에는 지장이 없다 */ }
   }, []);
   const toggleSidebar = () => setSidebarCollapsed(current => {
     const next = !current;
@@ -382,6 +404,15 @@ export default function App() {
   };
   const logoutUser = async () => {
     await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+    // 이 계정의 임시 저장본을 즉시 지운다.
+    // state 를 비우는 것만으로는 부족하다. auth.user 가 null 이 되면 저장 키도 사라져
+    // 빈 값을 덮어쓸 기회 없이 이전 내용이 그대로 남는다.
+    try {
+      if (storageScope) {
+        localStorage.removeItem(`muse-contis:${storageScope}`);
+        localStorage.removeItem(`muse-events:${storageScope}`);
+      }
+    } catch { /* 저장소를 못 써도 로그아웃은 계속한다 */ }
     setContis([]);
     setEvents([]);
     setSongs([]);

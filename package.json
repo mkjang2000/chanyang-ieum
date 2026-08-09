@@ -20,6 +20,7 @@
     "dev": "node scripts/vinext.mjs dev --hostname 0.0.0.0",
     "build": "node scripts/clean.mjs && node scripts/vinext.mjs build && node scripts/postbuild.mjs",
     "start": "node scripts/start.mjs",
+    "test": "node --test --test-concurrency=1 src/server/__tests__/",
     "db:migrate": "node scripts/migrate.mjs"
   },
   "dependencies": {

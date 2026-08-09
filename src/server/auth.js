@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 import { getPool, withTransaction } from './db.js';
+import { LoginBusyError, withLoginSlot } from './loginGate.js';
 
 const scrypt = promisify(scryptCallback);
 const SESSION_COOKIE = 'muse_session';
@@ -86,9 +87,12 @@ export async function hashPassword(password) {
     throw new AuthError(`비밀번호는 ${PASSWORD_MIN_LENGTH}자 이상이어야 합니다.`, 400);
   }
   if (password.length > 200) throw new AuthError('비밀번호가 너무 깁니다.', 400);
-  const salt = randomBytes(16);
-  const derived = await scrypt(password, salt, 64, { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
-  return `scrypt$32768$8$1$${salt.toString('base64')}$${Buffer.from(derived).toString('base64')}`;
+  // 길이 검사를 통과한 뒤에 자리를 잡는다. 형식이 틀린 요청은 대기 줄에 들어가지 않는다.
+  return withLoginSlot(async () => {
+    const salt = randomBytes(16);
+    const derived = await scrypt(password, salt, 64, { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
+    return `scrypt$32768$8$1$${salt.toString('base64')}$${Buffer.from(derived).toString('base64')}`;
+  });
 }
 
 export async function verifyPassword(password, encoded) {
@@ -218,7 +222,11 @@ export async function login(request, input) {
     [username],
   );
   const account = rows[0];
-  const valid = account && account.active && await verifyPassword(String(input.password || ''), account.passwordHash);
+  // 존재하지 않거나 비활성인 계정은 scrypt 까지 가지 않으므로 자리를 차지하지 않는다.
+  // 무작위 아이디를 쏟아붓는 요청이 정상 사용자의 대기 줄을 밀어내지 않는다.
+  const valid = Boolean(account) && Boolean(account.active) && await withLoginSlot(
+    () => verifyPassword(String(input.password || ''), account.passwordHash),
+  );
   if (!valid) {
     await recordLogin(request, { userId: account?.id || null, username, success: false });
     throw new AuthError('아이디 또는 비밀번호를 확인해 주세요.', 401);
@@ -354,6 +362,13 @@ export async function deleteUser(actor, id) {
 }
 
 export function authErrorResponse(error, fallback = '요청을 처리하지 못했어요.') {
+  // 혼잡으로 되돌려보낸 요청은 서버 오류가 아니다. 로그를 남기지 않고 429 로 알린다.
+  if (error instanceof LoginBusyError) {
+    return Response.json({ message: error.message }, {
+      status: error.status,
+      headers: { 'Retry-After': '5' },
+    });
+  }
   const status = error instanceof AuthError ? error.status : 500;
   if (status === 500) console.error(fallback, error);
   return Response.json({ message: status === 500 ? fallback : error.message }, { status });

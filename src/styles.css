@@ -65,6 +65,9 @@
 }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; min-height: 100dvh; background: var(--bg); }
+/* 내용이 짧은 화면에서 스크롤바가 사라지면 뷰포트 폭이 바뀌어 가운데 정렬된 레이아웃이
+   좌우로 흔들린다. 자리를 항상 비워 두어 화면 전환 때 위치가 튀지 않게 한다. */
+html { scrollbar-gutter: stable; }
 button, input, select { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .45; }
@@ -84,10 +87,14 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 /* 상단바 */
 .admin-page-header {
   position: sticky; z-index: 30; top: 0;
-  height: 56px; display: flex; align-items: center; gap: 12px;
-  padding: 0 var(--admin-gutter);
+  height: 56px;
   border-bottom: 1px solid var(--line);
   background: rgba(255,255,255,.92); backdrop-filter: blur(14px);
+}
+.admin-header-inner {
+  width: min(1400px,100%); height: 100%; margin: auto;
+  display: flex; align-items: center; gap: 12px;
+  padding: 0 var(--admin-gutter);
 }
 .admin-back {
   flex: 0 0 auto; width: 38px; height: 38px;
@@ -174,9 +181,57 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .alert-list li.info > i { background: var(--brand); }
 .alert-list button { flex: 0 0 auto; min-height: 30px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--text-muted); background: var(--surface); font-size: 11px; font-weight: 700; }
 .alert-list button:hover { color: var(--brand); border-color: var(--brand-border); background: var(--brand-soft); }
+.alert-list li > span { min-width: 0; }
+.alert-list li > span small { display: block; margin-top: 3px; color: var(--text-subtle); font-size: 11px; }
+.alert-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
+.alert-dismiss { width: 30px; padding: 0; display: grid; place-items: center; }
+.alert-dismiss svg { width: 14px; }
+.alert-dismiss:hover { color: var(--danger-text); border-color: var(--danger-border); background: var(--danger-soft); }
+.alert-restore { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--line-soft); color: var(--text-subtle); font-size: 11.5px; }
 .alert-clear { display: grid; place-items: center; gap: 8px; padding: 30px 16px; color: #15803d; }
 .alert-clear svg { width: 24px; }
 .alert-clear p { margin: 0; color: var(--text-muted); font-size: 12.5px; }
+
+/* Key 인식 실패 악보 */
+.key-failed-note { margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--line-soft); color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.key-failed-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.key-failed-list li { display: grid; grid-template-columns: 44px minmax(0,1fr) auto; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line-soft); }
+.key-failed-list li:last-child { border-bottom: 0; }
+.key-failed-list li.done { opacity: .55; }
+.key-failed-list img { width: 44px; height: 44px; border: 1px solid var(--line); border-radius: 8px; object-fit: cover; background: var(--surface-2); }
+.key-failed-list b { display: block; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.key-failed-list small { display: block; margin-top: 3px; color: var(--text-subtle); font-size: 11px; }
+/* 두 동작은 결과가 완전히 다르므로(재분석 vs 목록에서 제외) 형태로 확실히 구분한다.
+   테두리 없는 링크 두 개를 나란히 두면 한 버튼의 두 단어처럼 읽힌다. */
+.key-failed-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; }
+.chip-button {
+  display: inline-flex; align-items: center; gap: 5px;
+  min-height: 32px; padding: 0 11px;
+  border: 1px solid var(--brand-border); border-radius: 8px;
+  color: var(--brand); background: var(--brand-soft);
+  font-size: 11.5px; font-weight: 700; white-space: nowrap;
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+.chip-button svg { width: 13px; }
+.chip-button:hover:not(:disabled) { color: #fff; border-color: var(--brand); background: var(--brand); }
+.chip-button.muted { color: var(--text-muted); border-color: var(--line-strong); background: var(--surface); }
+.chip-button.muted:hover:not(:disabled) { color: var(--text-2); border-color: var(--text-subtle); background: var(--surface-2); }
+.chip-button:disabled { opacity: .5; }
+.key-failed-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line-soft); }
+.key-failed-bulk > span { flex: 1 1 100%; color: var(--text-subtle); font-size: 11.5px; }
+.key-failed-bulk .secondary-button { flex: 1 1 auto; min-height: 40px; }
+@media (min-width: 640px) {
+  .key-failed-bulk > span { flex: 1 1 auto; }
+  .key-failed-bulk .secondary-button { flex: 0 0 auto; min-width: 130px; }
+}
+
+/* 목록 페이지 이동 */
+.pager { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--line-soft); }
+.pager span { min-width: 60px; color: var(--text-muted); font-size: 12px; font-weight: 700; text-align: center; }
+.pager button { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text-muted); background: var(--surface); }
+.pager button svg { width: 15px; }
+.pager button:hover:not(:disabled) { color: var(--brand); border-color: var(--brand-border); background: var(--brand-soft); }
+.pager button:disabled { opacity: .4; }
 
 /* 최근 로그인 */
 .recent-list { display: grid; margin: 0; padding: 0; list-style: none; }
@@ -509,7 +564,8 @@ body.admin-mobile-menu-open { overflow: hidden; }
 @media (min-width: 900px) {
   .admin-page { --admin-gutter: 32px; padding-bottom: 0; }
   .admin-page-header { height: 64px; }
-  .admin-layout { display: grid; grid-template-columns: 216px minmax(0,1fr); min-height: calc(100dvh - 64px); }
+  /* 탭마다 내용 길이가 달라도 사이드바 높이가 들쭉날쭉해 보이지 않도록 최소 높이를 맞춘다. */
+  .admin-layout { display: grid; grid-template-columns: 216px minmax(0,1fr); align-items: stretch; min-height: calc(100dvh - 64px); }
   .admin-nav { display: block; padding: 22px 14px; border-right: 1px solid var(--line); }
   .admin-nav-label { margin: 0 0 8px 10px; color: var(--text-subtle); font-size: 10px; font-weight: 800; letter-spacing: .12em; }
   .admin-nav nav { display: grid; gap: 2px; position: sticky; top: 84px; }

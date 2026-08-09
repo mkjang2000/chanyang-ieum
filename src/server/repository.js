@@ -178,7 +178,8 @@ async function findContiOwnership(id, connection = getPool(), lock = false) {
   return rows[0] || null;
 }
 
-function assertContiOwner(conti, actor) {
+/* 콘티 수정·삭제 권한. 여기가 느슨해지면 남의 콘티를 지울 수 있게 되므로 테스트로 고정한다. */
+export function assertContiOwner(conti, actor) {
   if (actor.role === 'admin') return;
   if (conti?.ownerUserId === actor.id) return;
   throw new AuthError('본인이 인도하는 콘티만 수정하거나 삭제할 수 있습니다.', 403);

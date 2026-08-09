@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Activity, AlertTriangle, ArrowLeft, Check, ChevronDown, ChevronRight, Database, HardDrive,
+  Activity, AlertTriangle, ArrowLeft, Check, ChevronDown, ChevronLeft, ChevronRight, Database, HardDrive,
   KeyRound, LayoutDashboard, Link2, ListChecks, LogOut, MoreHorizontal, Music2, Plus, RadioTower, RefreshCw,
   Save, Search, Settings2, ShieldCheck, Trash2, UserPlus, Users, X, XCircle,
 } from 'lucide-react';
@@ -19,6 +19,9 @@ const TABS = [
   { id: 'system', label: '시스템', icon: Activity },
 ];
 const MOBILE_PRIMARY_TAB_IDS = new Set(['overview', 'users', 'shares', 'presets']);
+/* 관리자가 접어둔 점검 항목. 브라우저에만 두면 되는 개인 설정이라 서버에 저장하지 않는다. */
+const DISMISSED_ALERTS_KEY = 'muse-admin-dismissed-alerts';
+const KEY_PAGE_SIZE = 20;
 const ROLES = ['admin', 'leader', 'accompanist', 'member'];
 const roleLabel = role => ({ admin: '관리자', leader: '인도자', accompanist: '반주자', member: '성도' }[role] || role);
 
@@ -175,6 +178,26 @@ function StatusPill({ tone = 'idle', children }) {
   return <span className={`status-pill ${tone}`}><i/>{children}</span>;
 }
 
+/* 목록이 길어질 때 쓰는 페이지 이동. 한 페이지뿐이면 아무것도 그리지 않는다. */
+function Pager({ page, pageCount, disabled, onChange }) {
+  if (!pageCount || pageCount <= 1) return null;
+  return <div className="pager">
+    <button
+      type="button"
+      disabled={disabled || page <= 1}
+      onClick={() => onChange(page - 1)}
+      aria-label="이전 페이지"
+    ><ChevronLeft/></button>
+    <span>{page} / {pageCount}</span>
+    <button
+      type="button"
+      disabled={disabled || page >= pageCount}
+      onClick={() => onChange(page + 1)}
+      aria-label="다음 페이지"
+    ><ChevronRight/></button>
+  </div>;
+}
+
 function StatCard({ icon: Icon, label, value, sub, tone }) {
   return <article className="stat-card">
     <div className="stat-card-top"><span className={`stat-icon ${tone || ''}`.trim()}><Icon/></span>{sub && <small>{sub}</small>}</div>
@@ -243,14 +266,17 @@ export default function AdminPage() {
 
   return <div className="admin-page">
     <header className="admin-page-header">
-      <a className="admin-back" href="/" title="콘티로 돌아가기"><ArrowLeft/> <span>콘티</span></a>
-      <div className="admin-brand">
-        <span className="admin-brand-mark"><Music2/></span>
-        <div><b>{churchName || '찬양이음'}</b><small>관리자 콘솔</small></div>
-      </div>
-      <div className="admin-account" title={auth.user.displayName}>
-        <span className="admin-account-avatar">{auth.user.displayName.slice(0, 1)}</span>
-        <div><b>{auth.user.displayName}</b><small><ShieldCheck/> 관리자</small></div>
+      {/* 본문(.admin-layout)과 같은 폭으로 묶어야 넓은 화면에서 좌우가 어긋나지 않는다. */}
+      <div className="admin-header-inner">
+        <a className="admin-back" href="/" title="콘티로 돌아가기"><ArrowLeft/> <span>콘티</span></a>
+        <div className="admin-brand">
+          <span className="admin-brand-mark"><Music2/></span>
+          <div><b>{churchName || '찬양이음'}</b><small>관리자 콘솔</small></div>
+        </div>
+        <div className="admin-account" title={auth.user.displayName}>
+          <span className="admin-account-avatar">{auth.user.displayName.slice(0, 1)}</span>
+          <div><b>{auth.user.displayName}</b><small><ShieldCheck/> 관리자</small></div>
+        </div>
       </div>
     </header>
 
@@ -325,21 +351,63 @@ function OverviewPanel({ onNavigate }) {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  /* 점검 목록에는 "조치할 수 있는 것"만 남긴다.
+   *
+   * 선택 기능을 안 쓰기로 한 교회에서는 이미지 검색 키나 OCR 도구 경고가 영영 사라지지
+   * 않는다. 계속 떠 있는 경고는 나머지 진짜 경고까지 무시하게 만들기 때문에, 이런 항목은
+   * 접어둘 수 있게 하고(dismissed) 톤도 낮춘다. */
   const alerts = useMemo(() => {
     if (!data) return [];
     const { status, records } = data;
     const list = [];
-    if (!status.storage.ok) list.push({ tone: 'bad', text: '악보 저장소에 접근할 수 없습니다.', tab: 'system' });
-    if (!status.integrations.pdfOcr) list.push({ tone: 'warn', text: 'PDF OCR 도구가 설치되지 않아 제목 자동 인식이 꺼져 있습니다.', tab: 'system' });
-    if (!status.integrations.imageSearch) list.push({ tone: 'warn', text: '이미지 검색 API 키가 설정되지 않았습니다.', tab: 'system' });
-    if (status.keyQueue.failed) list.push({ tone: 'warn', text: `악보 Key 자동 인식이 ${status.keyQueue.failed}건 실패했습니다.`, tab: 'system' });
+    if (!status.storage.ok) {
+      list.push({ id: 'storage', tone: 'bad', text: '악보 저장소에 접근할 수 없습니다.', tab: 'system' });
+    }
+    if (status.keyQueue.failed) {
+      list.push({
+        id: 'key-failed',
+        tone: 'warn',
+        text: `악보 Key 자동 인식이 ${status.keyQueue.failed}건 실패했습니다.`,
+        tab: 'system',
+        hint: '시스템 탭에서 다시 시도하거나 확인 처리할 수 있어요.',
+      });
+    }
     const failedLogins = records.filter(record => !record.success).length;
-    if (failedLogins >= 5) list.push({ tone: 'warn', text: `최근 기록에 로그인 실패가 ${failedLogins}건 있습니다.`, tab: 'logins' });
+    if (failedLogins >= 5) {
+      list.push({ id: 'login-failures', tone: 'warn', text: `최근 기록에 로그인 실패가 ${failedLogins}건 있습니다.`, tab: 'logins' });
+    }
     if (status.maintenance.pending.images || status.maintenance.pending.songs) {
-      list.push({ tone: 'info', text: `사용하지 않는 데이터 ${formatBytes(status.maintenance.pending.bytes)}를 정리할 수 있습니다.`, tab: 'system' });
+      list.push({ id: 'cleanup', tone: 'info', text: `사용하지 않는 데이터 ${formatBytes(status.maintenance.pending.bytes)}를 정리할 수 있습니다.`, tab: 'system' });
+    }
+    // 아래 둘은 "설치하지 않기로 한" 선택 기능이라 접어둘 수 있게 한다.
+    if (!status.integrations.pdfOcr) {
+      list.push({ id: 'pdf-ocr', tone: 'info', text: 'PDF OCR 도구가 없어 제목 자동 인식이 꺼져 있습니다.', tab: 'system', optional: true });
+    }
+    if (!status.integrations.imageSearch) {
+      list.push({ id: 'image-search', tone: 'info', text: '이미지 검색 API 키가 설정되지 않았습니다.', tab: 'system', optional: true });
     }
     return list;
   }, [data]);
+
+  // 서버 렌더링 단계에는 localStorage 가 없으므로 마운트 후에 읽는다.
+  const [dismissed, setDismissed] = useState(() => new Set());
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(DISMISSED_ALERTS_KEY));
+      if (Array.isArray(stored) && stored.length) setDismissed(new Set(stored));
+    } catch { /* 저장본이 손상됐으면 전부 표시한다 */ }
+  }, []);
+  const dismissAlert = id => setDismissed(current => {
+    const next = new Set(current).add(id);
+    try { localStorage.setItem(DISMISSED_ALERTS_KEY, JSON.stringify([...next])); } catch { /* 무시 */ }
+    return next;
+  });
+  const restoreAlerts = () => {
+    setDismissed(new Set());
+    try { localStorage.removeItem(DISMISSED_ALERTS_KEY); } catch { /* 무시 */ }
+  };
+  const visibleAlerts = alerts.filter(alert => !dismissed.has(alert.id));
+  const hiddenCount = alerts.length - visibleAlerts.length;
 
   if (loading) return <><PanelHeading title="개요" description="교회 계정과 시스템 상태를 한눈에 확인합니다."/><Loading label="상태를 확인하고 있어요."/></>;
   if (error) return <><PanelHeading title="개요" description="교회 계정과 시스템 상태를 한눈에 확인합니다."/><ErrorNote message={error}/></>;
@@ -363,13 +431,33 @@ function OverviewPanel({ onNavigate }) {
       <StatCard icon={HardDrive} label="악보 저장 용량" value={formatBytes(status.counts.imageBytes)} sub={status.storage.ok ? '정상' : '확인 필요'} tone={status.storage.ok ? '' : 'bad'}/>
     </div>
 
-    <Section title="점검이 필요한 항목" meta={alerts.length ? `${alerts.length}건` : '이상 없음'}>
-      {alerts.length ? <ul className="alert-list">{alerts.map((alert, index) => (
-        <li key={index} className={alert.tone}>
-          <i/><span>{alert.text}</span>
-          <button type="button" onClick={() => onNavigate(alert.tab)}>보기</button>
+    <Section
+      title="점검이 필요한 항목"
+      meta={visibleAlerts.length
+        ? `${visibleAlerts.length}건`
+        : (hiddenCount ? `접어둔 ${hiddenCount}건` : '이상 없음')}
+    >
+      {visibleAlerts.length ? <ul className="alert-list">{visibleAlerts.map(alert => (
+        <li key={alert.id} className={alert.tone}>
+          <i/>
+          <span>{alert.text}{alert.hint && <small>{alert.hint}</small>}</span>
+          <div className="alert-actions">
+            <button type="button" onClick={() => onNavigate(alert.tab)}>보기</button>
+            {/* 선택 기능은 안 쓰기로 했을 수 있어 접어둘 수 있게 한다. */}
+            {alert.optional && <button
+              type="button"
+              className="alert-dismiss"
+              title="이 항목 접어두기"
+              aria-label="이 항목 접어두기"
+              onClick={() => dismissAlert(alert.id)}
+            ><X/></button>}
+          </div>
         </li>
       ))}</ul> : <div className="alert-clear"><Check/><p>모든 항목이 정상입니다.</p></div>}
+      {hiddenCount > 0 && <div className="alert-restore">
+        <span>접어둔 항목 {hiddenCount}건</span>
+        <button type="button" className="link-button" onClick={restoreAlerts}>다시 표시</button>
+      </div>}
     </Section>
 
     <Section title="최근 로그인" meta={<button type="button" className="link-button" onClick={() => onNavigate('logins')}>전체 보기</button>}>
@@ -1132,12 +1220,53 @@ function SystemPanel({ notify }) {
   const [error, setError] = useState('');
   const { confirm, dialog } = useConfirm();
 
+  const [keyList, setKeyList] = useState({ images: [], page: 1, pageCount: 1, total: 0, failed: 0 });
+  const [keyBusy, setKeyBusy] = useState('');
+  const [keyPage, setKeyPage] = useState(1);
+
   const load = useCallback(async () => {
     setLoading(true);
-    try { setStatus(await requestJson('/api/admin/system')); setError(''); }
-    catch (loadError) { setError(loadError.message); } finally { setLoading(false); }
-  }, []);
+    try {
+      const [systemStatus, keyData] = await Promise.all([
+        requestJson('/api/admin/system'),
+        requestJson(`/api/admin/key-images?page=${keyPage}&pageSize=${KEY_PAGE_SIZE}`),
+      ]);
+      setStatus(systemStatus);
+      setKeyList(keyData);
+      setError('');
+    } catch (loadError) { setError(loadError.message); } finally { setLoading(false); }
+  }, [keyPage]);
   useEffect(() => { load(); }, [load]);
+
+  /* 판독 실패 악보를 다시 분석하거나, 더 손댈 수 없다고 확인 처리한다.
+     ids 를 주지 않으면 실패 전체가 대상이다. */
+  const handleKeyImages = async (action, ids = null) => {
+    if (action === 'acknowledge' && !ids) {
+      const ok = await confirm({
+        title: '실패한 악보를 모두 확인 처리할까요?',
+        body: '점검 목록에서 사라집니다. Key 는 악보를 열어 직접 입력할 수 있어요.',
+        confirmLabel: '확인 처리',
+        tone: 'default',
+      });
+      if (!ok) return;
+    }
+    setKeyBusy(ids ? ids[0] : action);
+    setError('');
+    try {
+      const data = await requestJson('/api/admin/key-images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, ids, page: keyPage, pageSize: KEY_PAGE_SIZE }),
+      });
+      setKeyList(data);
+      // 마지막 페이지의 항목을 모두 처리하면 서버가 앞 페이지로 당겨 준다.
+      if (data.page !== keyPage) setKeyPage(data.page);
+      setStatus(current => (current ? { ...current, keyQueue: data.status } : current));
+      notify(action === 'retry'
+        ? `${data.updated}건을 다시 분석하도록 했어요.`
+        : `${data.updated}건을 확인 처리했어요.`);
+    } catch (actionError) { setError(actionError.message); } finally { setKeyBusy(''); }
+  };
 
   const cleanup = async () => {
     const pending = status?.maintenance.pending;
@@ -1190,8 +1319,77 @@ function SystemPanel({ notify }) {
           <li><span>PDF 제목 OCR</span><StatusPill tone={status.integrations.pdfOcr ? 'ok' : 'warn'}>{status.integrations.pdfOcr ? '사용 가능' : '도구 확인 필요'}</StatusPill></li>
           <li><span>악보 Key 자동 인식</span><StatusPill tone={status.keyQueue.available ? 'ok' : 'warn'}>{status.keyQueue.available ? (status.keyQueue.running ? '작동 중' : '사용 가능') : '미설정'}</StatusPill></li>
           <li><span>마지막 저장소 정리</span><b>{status.maintenance.lastRunAt || '실행 기록 없음'}</b></li>
+          {status.loginGate && <li>
+            <span>로그인 동시 처리</span>
+            <StatusPill tone={status.loginGate.waiting ? 'warn' : 'ok'}>
+              {status.loginGate.waiting
+                ? `${status.loginGate.active}/${status.loginGate.limit} · 대기 ${status.loginGate.waiting}`
+                : `최대 ${status.loginGate.limit}건 동시 처리`}
+            </StatusPill>
+          </li>}
         </ul>
       </Section>
+
+      {keyList.total > 0 && <Section
+        title="Key 인식 실패 악보"
+        meta={keyList.failed ? `실패 ${keyList.failed}건 · 전체 ${keyList.total}건` : `모두 확인됨 · ${keyList.total}건`}
+      >
+        <p className="key-failed-note">
+          손글씨나 기울어진 악보는 자동 인식이 어렵습니다. 스캔을 다시 올렸다면 다시 분석하고,
+          그렇지 않으면 확인 처리해 점검 목록에서 지우세요. Key 는 악보에서 직접 입력할 수 있습니다.
+        </p>
+        <ul className="key-failed-list">{keyList.images.map(image => (
+          <li key={image.id} className={image.status === 'acknowledged' ? 'done' : ''}>
+            <img src={image.image} alt="" loading="lazy" decoding="async"/>
+            <div>
+              <b>{image.title || '제목 없는 악보'}</b>
+              <small>
+                {image.status === 'acknowledged' ? '확인함' : '판독 실패'}
+                {image.checkedAt && ` · ${image.checkedAt}`}
+                {!image.inUse && ' · 콘티에서 사용 안 함'}
+              </small>
+            </div>
+            <div className="key-failed-actions">
+              <button
+                type="button"
+                className="chip-button"
+                disabled={Boolean(keyBusy)}
+                title="이 악보를 다시 분석합니다"
+                onClick={() => handleKeyImages('retry', [image.id])}
+              ><RefreshCw/> 다시 분석</button>
+              {image.status === 'failed' && <button
+                type="button"
+                className="chip-button muted"
+                disabled={Boolean(keyBusy)}
+                title="점검 목록에서 제외합니다"
+                onClick={() => handleKeyImages('acknowledge', [image.id])}
+              ><Check/> 확인함</button>}
+            </div>
+          </li>
+        ))}</ul>
+        <Pager
+          page={keyList.page}
+          pageCount={keyList.pageCount}
+          disabled={Boolean(keyBusy)}
+          onChange={setKeyPage}
+        />
+        {keyList.failed > 0 && <div className="key-failed-bulk">
+          {/* 일괄 처리는 현재 페이지가 아니라 실패 전체가 대상이다. */}
+          <span>실패 {keyList.failed}건 전체를</span>
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={Boolean(keyBusy)}
+            onClick={() => handleKeyImages('retry')}
+          >{keyBusy === 'retry' ? '처리 중…' : '모두 다시 분석'}</button>
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={Boolean(keyBusy)}
+            onClick={() => handleKeyImages('acknowledge')}
+          >{keyBusy === 'acknowledge' ? '처리 중…' : '모두 확인 처리'}</button>
+        </div>}
+      </Section>}
 
       <Section title="저장소 정리" className="cleanup-card">
         <div className="system-cleanup">

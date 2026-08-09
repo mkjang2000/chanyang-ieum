@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { getImageStorageDir } from './config.js';
 import { getPool } from './db.js';
 import { getKeyQueueStatus } from './keyqueue.js';
+import { getLoginGateStatus } from './loginGate.js';
 import { getMaintenanceStatus } from './maintenance.js';
 
 const run = promisify(execFile);
@@ -78,6 +79,7 @@ export async function getSystemStatus() {
       poppler: tools[1] && tools[2],
     },
     keyQueue,
+    loginGate: getLoginGateStatus(),
     maintenance,
   };
 }

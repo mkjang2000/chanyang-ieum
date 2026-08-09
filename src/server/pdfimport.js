@@ -23,7 +23,9 @@ function pageNumber(name) {
   return Number(match?.[1] || 0);
 }
 
-function cleanLine(value) {
+/* OCR 한 줄에서 제목이 될 수 없는 장식을 걷어낸다.
+   정규식 체인이 길어 회귀가 잘 보이지 않으므로 테스트에서 직접 확인한다. */
+export function cleanLine(value) {
   return String(value || '')
     .replace(/[\u0000-\u001f\u007f]/g, ' ')
     .replace(/\s+/g, ' ')
@@ -36,7 +38,9 @@ function cleanLine(value) {
     .trim();
 }
 
-const excludedTitle = /(https?:\/\/|www\.|copyright|all rights|ccli|words?\s*(?:&|and)\s*music|lyrics?|arrang(?:ed|er)|작사|작곡|편곡|채보|번역|verse|chorus|bridge|intro|interlude|ending|bpm|tempo)/i;
+/* cleanLine 이 콜론을 지운 뒤에 검사되므로 'https //example.com' 형태도 함께 막는다.
+   (콜론을 요구하는 패턴만 두면 악보 하단의 출처 URL 이 제목으로 뽑힌다.) */
+const excludedTitle = /(https?\s*:?\s*\/\/|www\.|copyright|all rights|ccli|words?\s*(?:&|and)\s*music|lyrics?|arrang(?:ed|er)|작사|작곡|편곡|채보|번역|verse|chorus|bridge|intro|interlude|ending|bpm|tempo)/i;
 const chordOnly = /^(?:[A-G](?:#|b)?(?:m|maj|min|sus|dim|aug|add)?\d*(?:\/[A-G](?:#|b)?)?[\s|:,.·-]*){2,}$/i;
 
 function usableTitle(line) {
@@ -49,7 +53,7 @@ function usableTitle(line) {
   return letters >= 2 && letters / Math.max(visible, 1) >= 0.65;
 }
 
-function titleCandidate(text) {
+export function titleCandidate(text) {
   const candidates = String(text || '').split(/\r?\n/)
     .map(cleanLine)
     .filter(usableTitle);

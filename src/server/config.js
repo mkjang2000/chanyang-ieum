@@ -26,3 +26,29 @@ export function getDatabaseConfig() {
 export function getImageStorageDir() {
   return requiredValue('IMAGE_STORAGE_DIR');
 }
+
+/* 비밀번호 검증(scrypt)을 동시에 몇 건까지 돌릴지.
+ *
+ * scrypt N=32768 은 1건당 CPU 코어 하나를 50~100ms 점유하고 메모리 64MB 를 쓴다.
+ * 상한이 없으면 로그인 요청 50건만 동시에 들어와도 3GB 를 잡아 서버가 멈춘다.
+ * 반대로 정상 사용자(찬양단 20명이 예배 직전에 몰리는 경우)는 순서만 기다리면 되므로
+ * 기본값 2 로도 마지막 사람이 1초 안에 처리된다.
+ *
+ * 서버 사양에 여유가 있으면 LOGIN_CONCURRENCY 로 늘린다. 코어 수 이하를 권장한다.
+ */
+export function getLoginConcurrency() {
+  const value = Number(process.env.LOGIN_CONCURRENCY);
+  if (!Number.isInteger(value) || value < 1) return 2;
+  return Math.min(64, value);
+}
+
+/* 대기 줄의 상한. 여기까지 차면 새 요청은 기다리지 않고 429 로 돌려보낸다.
+ *
+ * 정상 사용자 20~30명으로는 절대 닿지 않는 값이라 실질적으로는 봇만 걸린다.
+ * 상한이 없으면 요청이 무한정 쌓여, 결국 막으려던 메모리 고갈이 그대로 일어난다.
+ */
+export function getLoginQueueLimit() {
+  const value = Number(process.env.LOGIN_QUEUE_LIMIT);
+  if (!Number.isInteger(value) || value < 1) return 50;
+  return Math.min(1000, value);
+}

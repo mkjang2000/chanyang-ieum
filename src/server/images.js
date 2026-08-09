@@ -63,7 +63,9 @@ const MIME_TO_EXTENSION = {
   'image/avif': 'avif',
 };
 
-function isPrivateAddress(address) {
+/* 외부 이미지를 가져오기 전에 해석된 IP 가 내부망인지 판별한다.
+   SSRF 방어의 핵심이라 회귀를 잡을 수 있도록 노출한다. */
+export function isPrivateAddress(address) {
   if (address === '::1' || address === '::') return true;
   if (address.startsWith('fc') || address.startsWith('fd') || address.startsWith('fe80:')) return true;
   if (address.startsWith('::ffff:')) return isPrivateAddress(address.slice(7));
