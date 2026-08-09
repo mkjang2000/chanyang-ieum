@@ -2,8 +2,8 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ArrowLeft, Download, FileImage, Maximize2, Minimize2, Minus, PanelLeftClose,
-  PanelLeftOpen, Plus, Share2, X, ZoomIn,
+  ArrowLeft, ChevronLeft, ChevronRight, Download, FileImage, Maximize2, Minimize2,
+  Minus, PanelLeftClose, PanelLeftOpen, Plus, Share2, X, ZoomIn,
 } from 'lucide-react';
 import FlowSignalIcon from './FlowSignalIcon.jsx';
 import SongTransition from './SongTransition.jsx';
@@ -27,6 +27,7 @@ export default function DocumentViewer({
   const [flowSignal, setFlowSignal] = useState(null);
   const [signalSending, setSignalSending] = useState('');
   const [signalError, setSignalError] = useState('');
+  const [quickSignalsOpen, setQuickSignalsOpen] = useState(true);
   const [downloadOpen, setDownloadOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -411,16 +412,31 @@ export default function DocumentViewer({
         <FlowSignalIcon name={flowSignal.icon}/>
         <div><b>{flowSignal.label}</b><span>{flowSignal.sender?.displayName || '인도자'}님의 진행 알림</span></div>
       </div>}
-      {canSendSignals && quickSignalsEnabled && flowSignals.length > 0 && <div className="viewer-flow-quick" data-position={quickSignalsPosition === 'right' ? 'right' : 'left'} aria-label="빠른 진행 알림">
-        {flowSignals.map(({ id, label, icon, color }) => <button
+      {canSendSignals && quickSignalsEnabled && flowSignals.length > 0 && <div
+        className={`viewer-flow-quick ${quickSignalsOpen ? 'open' : 'collapsed'}`}
+        data-position={quickSignalsPosition === 'right' ? 'right' : 'left'}
+        aria-label="빠른 진행 알림"
+      >
+        {quickSignalsOpen && flowSignals.map(({ id, label, icon, color }) => <button
           key={id}
           type="button"
+          className="quick-signal-button"
           style={{ '--signal-color': color }}
           disabled={Boolean(signalSending)}
           onClick={() => sendFlowSignal(id)}
           aria-label={label}
           title={label}
         ><FlowSignalIcon name={icon}/>{signalSending === id && <i/>}</button>)}
+        <button
+          type="button"
+          className="quick-signal-toggle"
+          onClick={() => setQuickSignalsOpen(current => !current)}
+          aria-expanded={quickSignalsOpen}
+          aria-label={quickSignalsOpen ? '빠른 진행 알림 접기' : '빠른 진행 알림 펼치기'}
+          title={quickSignalsOpen ? '퀵버튼 접기' : '퀵버튼 펼치기'}
+        >{quickSignalsPosition === 'right'
+            ? quickSignalsOpen ? <ChevronRight/> : <ChevronLeft/>
+            : quickSignalsOpen ? <ChevronLeft/> : <ChevronRight/>}</button>
       </div>}
       <aside className="viewer-thumbs" ref={thumbsRef}>
         <div className="thumb-heading"><span>곡 목록</span><b>{conti.pages.length}곡</b></div>

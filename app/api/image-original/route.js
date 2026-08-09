@@ -1,4 +1,5 @@
 import { authErrorResponse, requireUser } from '../../../src/server/auth.js';
+import { getDaumSourceReferer } from '../../../src/server/externalImageUrls.js';
 
 const NAVER_BLOG_HOSTS = new Set(['blog.naver.com', 'm.blog.naver.com']);
 const NAVER_IMAGE_HOSTS = new Set([
@@ -58,7 +59,12 @@ const getOriginalFileUrl = url => {
   return original;
 };
 
-const getProxyPath = url => `/api/image-original?image=${encodeURIComponent(url.toString())}`;
+const getProxyPath = (url, sourceUrl = '') => {
+  const params = new URLSearchParams({ image: url.toString() });
+  const referer = getDaumSourceReferer(sourceUrl, url.hostname);
+  if (referer) params.set('referer', referer);
+  return `/api/image-original?${params}`;
+};
 
 /* 검색 결과의 네이버 이미지는 ?type=w966 처럼 축소본으로 노출된다.
    blogfiles 호스트 + 쿼리 제거만으로 원본을 받을 수 있어, 블로그 HTML 파싱보다
@@ -199,9 +205,10 @@ export async function GET(request) {
 
   try {
     // 일부 호스트는 Referer 가 없으면 거부한다.
+    const sourceReferer = getDaumSourceReferer(searchParams.get('referer'), imageUrl.hostname);
     const referer = imageUrl.hostname.endsWith('pstatic.net')
       ? 'https://blog.naver.com/'
-      : 'https://search.daum.net/';
+      : sourceReferer || 'https://search.daum.net/';
     // uf.daum.net 등 구형 호스트는 HTTPS 를 지원하지 않아 강제 승격하면 실패한다.
     const target = isHttpsOnlyHost(imageUrl.hostname)
       ? useHttps(imageUrl.toString())
@@ -214,9 +221,9 @@ export async function GET(request) {
     const contentType = response.headers.get('content-type') || '';
     const contentLength = Number(response.headers.get('content-length')) || 0;
     if (!response.ok || !SAFE_IMAGE_TYPES.has(contentType.split(';')[0].toLowerCase())) {
-      throw new Error(`Naver image returned ${response.status}`);
+      throw new Error(`Remote image returned ${response.status}`);
     }
-    if (contentLength > MAX_IMAGE_BYTES) throw new Error('Naver image is too large');
+    if (contentLength > MAX_IMAGE_BYTES) throw new Error('Remote image is too large');
 
     const headers = new Headers({
       'Content-Type': contentType,
@@ -227,7 +234,7 @@ export async function GET(request) {
     if (contentLength) headers.set('Content-Length', String(contentLength));
     return new Response(response.body, { headers });
   } catch (error) {
-    console.error('Naver original image proxy failed', error.message);
+    console.error('Original image proxy failed', error.message);
     return Response.json({ message: '원본 이미지를 불러오지 못했어요.' }, { status: 502 });
   }
 }
@@ -262,8 +269,8 @@ export async function POST(request) {
   const currentFile = currentImage;
   const currentPixels = currentWidth * currentHeight;
   const asIs = () => Response.json({
-    image: getProxyPath(currentFile),
-    fallbackImage: getProxyPath(currentFile),
+    image: getProxyPath(currentFile, body.sourceUrl),
+    fallbackImage: getProxyPath(currentFile, body.sourceUrl),
     width: currentWidth || null,
     height: currentHeight || null,
     upgraded: false,
@@ -313,8 +320,8 @@ export async function POST(request) {
   const bestPixels = best.width * best.height;
   const upgraded = bestPixels > 0 && (!currentPixels || bestPixels > currentPixels * 1.2);
   return Response.json({
-    image: getProxyPath(upgraded ? best.url : currentFile),
-    fallbackImage: getProxyPath(currentFile),
+    image: getProxyPath(upgraded ? best.url : currentFile, body.sourceUrl),
+    fallbackImage: getProxyPath(currentFile, body.sourceUrl),
     width: upgraded ? best.width : (currentWidth || null),
     height: upgraded ? best.height : (currentHeight || null),
     upgraded,

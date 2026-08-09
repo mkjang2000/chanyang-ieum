@@ -60,32 +60,43 @@ export default function App() {
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [serverReady, setServerReady] = useState(false);
   const [modal, setModal] = useState(null);
+  const modalOpen = Boolean(modal);
   const [toast, setToast] = useState('');
   const [mobileMenu, setMobileMenu] = useState(false);
   // 태블릿·PC 에서 사이드바를 접어 본문을 넓게 쓰는 상태. 브라우저에 기억시킨다.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const viewerHistoryRef = useRef({ active: false, token: '' });
 
+  /* 모바일 브라우저의 주소창이 접히거나 펼쳐질 때 실제 보이는 영역은 100vh와
+     다를 수 있다. 뷰어뿐 아니라 설정·편집 모달도 같은 VisualViewport를 쓴다. */
   useEffect(() => {
-    if (modal?.type !== 'viewer') return undefined;
+    if (!modalOpen) return undefined;
     const root = document.documentElement;
     const viewport = window.visualViewport;
+    let frame = 0;
     const syncViewport = () => {
+      frame = 0;
       root.style.setProperty('--visual-viewport-top', `${viewport?.offsetTop || 0}px`);
       root.style.setProperty('--visual-viewport-left', `${viewport?.offsetLeft || 0}px`);
       root.style.setProperty('--visual-viewport-width', `${viewport?.width || window.innerWidth}px`);
       root.style.setProperty('--visual-viewport-height', `${viewport?.height || window.innerHeight}px`);
     };
-    syncViewport();
-    viewport?.addEventListener('resize', syncViewport);
-    viewport?.addEventListener('scroll', syncViewport);
-    window.addEventListener('orientationchange', syncViewport);
-    return () => {
-      viewport?.removeEventListener('resize', syncViewport);
-      viewport?.removeEventListener('scroll', syncViewport);
-      window.removeEventListener('orientationchange', syncViewport);
+    const scheduleSync = () => {
+      if (!frame) frame = window.requestAnimationFrame(syncViewport);
     };
-  }, [modal?.type]);
+    syncViewport();
+    viewport?.addEventListener('resize', scheduleSync);
+    viewport?.addEventListener('scroll', scheduleSync);
+    window.addEventListener('orientationchange', scheduleSync);
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      viewport?.removeEventListener('resize', scheduleSync);
+      viewport?.removeEventListener('scroll', scheduleSync);
+      window.removeEventListener('orientationchange', scheduleSync);
+      ['--visual-viewport-top', '--visual-viewport-left', '--visual-viewport-width', '--visual-viewport-height']
+        .forEach(property => root.style.removeProperty(property));
+    };
+  }, [modalOpen]);
 
   useEffect(() => {
     try {
@@ -666,51 +677,57 @@ function SettingsModal({
   });
   const [preferences, setPreferences] = useState(settings.preferences);
   const [saving, setSaving] = useState('');
-  const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const requestSave = async (scope, body) => {
-    setSaving(scope); setError(''); setMessage('');
-    try {
-      const response = await fetch('/api/settings', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scope, ...body }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.message || '환경 설정을 저장하지 못했어요.');
-      return data;
-    } finally {
-      setSaving('');
-    }
+    const response = await fetch('/api/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope, ...body }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.message || '환경 설정을 저장하지 못했어요.');
+    return data;
   };
-  const saveProfile = async event => {
+  const profileChanged = profile.displayName.trim() !== currentUser.displayName
+    || Boolean(profile.password || profile.confirmPassword);
+  const preferencesChanged = preferences.quickSignalsEnabled !== settings.preferences.quickSignalsEnabled
+    || preferences.quickSignalsPosition !== settings.preferences.quickSignalsPosition;
+  const saveAll = async event => {
     event.preventDefault();
     if (profile.password && profile.password !== profile.confirmPassword) {
       setError('새 비밀번호 확인이 일치하지 않습니다.');
       return;
     }
+    if (!profile.displayName.trim()) {
+      setError('표시 이름을 입력해 주세요.');
+      return;
+    }
+    if (!profileChanged && !preferencesChanged) {
+      onClose();
+      return;
+    }
+    setSaving('all');
+    setError('');
     try {
-      const data = await requestSave('profile', profile);
-      if (data.passwordChanged) {
+      let preferencesData = null;
+      let profileData = null;
+      if (preferencesChanged) preferencesData = await requestSave('preferences', preferences);
+      if (profileChanged) profileData = await requestSave('profile', profile);
+
+      if (preferencesData) {
+        setPreferences(preferencesData.preferences);
+        onApply({ preferences: preferencesData.preferences });
+      }
+      if (profileData?.passwordChanged) {
         await onLogout();
         return;
       }
-      onUserChange(data.user);
-      setProfile(current => ({ ...current, password: '', confirmPassword: '' }));
-      setMessage('내 정보가 저장됐어요.');
+      if (profileData?.user) onUserChange(profileData.user);
+      onClose();
     } catch (saveError) {
       setError(saveError.message);
-    }
-  };
-  const savePreferences = async event => {
-    event.preventDefault();
-    try {
-      const data = await requestSave('preferences', preferences);
-      setPreferences(data.preferences);
-      onApply({ preferences: data.preferences });
-      setMessage('뷰어 개인 설정이 저장됐어요.');
-    } catch (saveError) {
-      setError(saveError.message);
+    } finally {
+      setSaving('');
     }
   };
   return <ModalShell onClose={onClose} wide>
@@ -718,8 +735,8 @@ function SettingsModal({
       <div><h2>환경 설정</h2><p>내 계정과 뷰어의 개인 설정을 관리하세요.</p></div>
       <button className="modal-close" onClick={onClose}><X/></button>
     </div>
-    <div className="settings-body">
-      <form className="settings-section" onSubmit={saveProfile}>
+    <form id="settings-form" className="settings-body" onSubmit={saveAll}>
+      <section className="settings-section">
         <div className="settings-heading"><div><h3>내 계정</h3><p>아이디는 변경할 수 없습니다.</p></div><span>{roleLabel(currentUser.role)}</span></div>
         <div className="settings-grid">
           <label><span>아이디</span><input value={currentUser.username} disabled/></label>
@@ -727,10 +744,9 @@ function SettingsModal({
           <label><span>새 비밀번호 <em>선택</em></span><input type="password" autoComplete="new-password" placeholder="8자 이상" value={profile.password} onChange={event => setProfile(current => ({ ...current, password: event.target.value }))}/></label>
           <label><span>새 비밀번호 확인</span><input type="password" autoComplete="new-password" value={profile.confirmPassword} onChange={event => setProfile(current => ({ ...current, confirmPassword: event.target.value }))}/></label>
         </div>
-        <div className="settings-actions"><button className="secondary-button" disabled={saving === 'profile' || !profile.displayName.trim()}>내 정보 저장</button></div>
-      </form>
+      </section>
 
-      {['admin', 'leader'].includes(currentUser.role) && <form className="settings-section" onSubmit={savePreferences}>
+      {['admin', 'leader'].includes(currentUser.role) && <section className="settings-section">
         <div className="settings-heading"><div><h3>뷰어 빠른 진행 알림</h3><p>악보 하단에서 바로 누를 진행 알림 버튼을 설정합니다.</p></div><span>개인 설정</span></div>
         <div className="quick-signal-preferences">
           <label className="settings-check"><span>퀵버튼 표시</span><span><input type="checkbox" checked={preferences.quickSignalsEnabled !== false} onChange={event => setPreferences(current => ({ ...current, quickSignalsEnabled: event.target.checked }))}/>{preferences.quickSignalsEnabled !== false ? '사용' : '사용 안 함'}</span></label>
@@ -742,11 +758,12 @@ function SettingsModal({
             </div>
           </fieldset>
         </div>
-        <div className="settings-actions"><button className="secondary-button" disabled={saving === 'preferences'}>뷰어 설정 저장</button></div>
-      </form>}
+      </section>}
       {error && <div className="form-error settings-feedback">{error}</div>}
-      {message && <div className="settings-message"><Check/> {message}</div>}
+    </form>
+    <div className="modal-footer">
+      <button type="button" className="secondary-button" disabled={Boolean(saving)} onClick={onClose}>취소</button>
+      <button type="submit" form="settings-form" className="primary-button" disabled={Boolean(saving)}>{saving ? <><div className="button-spinner"/> 저장 중…</> : '확인'}</button>
     </div>
-    <div className="modal-footer"><button className="primary-button" onClick={onClose}>닫기</button></div>
   </ModalShell>;
 }

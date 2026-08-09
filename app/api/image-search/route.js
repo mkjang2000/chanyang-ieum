@@ -1,5 +1,6 @@
 import { findStoredImages } from '../../../src/server/repository.js';
 import { authErrorResponse, requireUser } from '../../../src/server/auth.js';
+import { normalizeSearchImageUrl } from '../../../src/server/externalImageUrls.js';
 
 const DAUM_IMAGE_SEARCH_URL = 'https://dapi.kakao.com/v2/search/image';
 
@@ -150,19 +151,19 @@ export async function GET(request) {
     const seenImages = new Set();
     const externalItems = allowedDocuments
       .filter(document => {
-        const imageUrl = useHttps(document.image_url);
+        const imageUrl = normalizeSearchImageUrl(document.image_url);
         if (seenImages.has(imageUrl)) return false;
         seenImages.add(imageUrl);
         return true;
       })
       .map(document => {
-        const image = useHttps(document.image_url);
+        const image = normalizeSearchImageUrl(document.image_url);
         const width = Number(document.width) || null;
         const height = Number(document.height) || null;
         return {
           title: baseQuery,
           image,
-          thumbnail: useHttps(document.thumbnail_url),
+          thumbnail: normalizeSearchImageUrl(document.thumbnail_url),
           source: stripHtml(document.display_sitename) || getHostname(document.doc_url) || 'Daum 이미지 검색',
           sourceUrl: useHttps(document.doc_url),
           width,

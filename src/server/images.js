@@ -7,6 +7,7 @@ import { imageSize } from 'image-size';
 import sharp from 'sharp';
 import { getImageStorageDir } from './config.js';
 import { getPool } from './db.js';
+import { getDaumSourceReferer } from './externalImageUrls.js';
 
 const storageRoot = () => path.resolve(getImageStorageDir());
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
@@ -47,6 +48,7 @@ const isHttpsOnlyHost = hostname => {
 const refererFor = hostname => (hostname.toLowerCase().endsWith('pstatic.net')
   ? 'https://blog.naver.com/'
   : 'https://search.daum.net/');
+
 const TYPE_TO_MIME = {
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
@@ -109,7 +111,7 @@ function parseRemoteImage(value) {
   return new URL(value);
 }
 
-async function fetchRemoteImage(initialUrl, redirectCount = 0) {
+async function fetchRemoteImage(initialUrl, redirectCount = 0, sourceUrl = '') {
   const url = typeof initialUrl === 'string' ? parseRemoteImage(initialUrl) : initialUrl;
   await assertPublicUrl(url);
   const response = await fetch(url, {
@@ -118,7 +120,7 @@ async function fetchRemoteImage(initialUrl, redirectCount = 0) {
       Accept: 'image/avif,image/webp,image/png,image/jpeg,image/gif',
       'User-Agent': 'Mozilla/5.0 (compatible; ChanyangIeum/1.0)',
       // 네이버·다음 이미지 서버는 Referer 가 없으면 거부하는 경우가 있다.
-      Referer: refererFor(url.hostname),
+      Referer: getDaumSourceReferer(sourceUrl, url.hostname) || refererFor(url.hostname),
     },
     cache: 'no-store',
     signal: AbortSignal.timeout(10000),
@@ -128,7 +130,7 @@ async function fetchRemoteImage(initialUrl, redirectCount = 0) {
     if (redirectCount >= MAX_REDIRECTS) throw new Error('이미지 주소의 이동 횟수가 너무 많습니다.');
     const location = response.headers.get('location');
     if (!location) throw new Error('이미지 이동 주소가 없습니다.');
-    return fetchRemoteImage(new URL(location, url), redirectCount + 1);
+    return fetchRemoteImage(new URL(location, url), redirectCount + 1, sourceUrl);
   }
   if (!response.ok) throw new Error(`이미지를 불러오지 못했습니다 (${response.status}).`);
 
@@ -180,7 +182,9 @@ export async function prepareImage(page) {
     if (id) return { existingId: id };
   }
 
-  const raw = page.image.startsWith('data:') ? decodeDataUrl(page.image) : await fetchRemoteImage(page.image);
+  const raw = page.image.startsWith('data:')
+    ? decodeDataUrl(page.image)
+    : await fetchRemoteImage(page.image, 0, page.sourceUrl);
   return prepareImageBuffer(raw.buffer, {
     declaredMime: raw.declaredMime,
     sourceUrl: page.sourceUrl || raw.sourceUrl,

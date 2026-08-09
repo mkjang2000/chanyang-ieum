@@ -6,6 +6,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { isPrivateAddress } from '../images.js';
+import { getDaumSourceReferer, normalizeSearchImageUrl } from '../externalImageUrls.js';
 
 const PRIVATE = [
   ['127.0.0.1', '루프백'],
@@ -50,4 +51,28 @@ test('공인 주소는 통과시킨다', () => {
   for (const [address, label] of PUBLIC) {
     assert.equal(isPrivateAddress(address), false, `${label}: ${address}`);
   }
+});
+
+test('구형 다음 카페 이미지의 HTTP 스킴을 보존한다', () => {
+  assert.equal(
+    normalizeSearchImageUrl('http://cfile270.uf.daum.net/image.jpg'),
+    'http://cfile270.uf.daum.net/image.jpg',
+  );
+  assert.equal(
+    normalizeSearchImageUrl('http://pds77.cafe.daum.net/download.php?file=image.jpg'),
+    'http://pds77.cafe.daum.net/download.php?file=image.jpg',
+  );
+  assert.equal(
+    normalizeSearchImageUrl('http://blog.kakaocdn.net/image.jpg'),
+    'https://blog.kakaocdn.net/image.jpg',
+  );
+});
+
+test('다음 이미지에는 다음 원문 Referer만 허용한다', () => {
+  assert.equal(
+    getDaumSourceReferer('https://cafe.daum.net/worship/123', 'pds77.cafe.daum.net'),
+    'https://cafe.daum.net/worship/123',
+  );
+  assert.equal(getDaumSourceReferer('https://example.com/private', 'pds77.cafe.daum.net'), '');
+  assert.equal(getDaumSourceReferer('https://cafe.daum.net/worship/123', 'postfiles.pstatic.net'), '');
 });
