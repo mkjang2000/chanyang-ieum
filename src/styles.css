@@ -631,6 +631,7 @@ body.admin-mobile-menu-open { overflow: hidden; }
   .admin-action-button:active:not(:disabled),
   .admin-mobile-tabs button.active svg,
   .admin-mobile-tabs button:active svg { transform: none; }
+  .quick-signal-list { transition: none; }
 }
 .app-shell { min-height: 100dvh; }
 .sidebar { position: fixed; z-index: 20; left: 0; top: 0; bottom: 0; width: var(--sidebar); display: flex; flex-direction: column; background: #fff; border-right: 1px solid var(--line); padding: 27px 18px 20px; }
@@ -1155,20 +1156,29 @@ input:focus, select:focus { border-color: var(--brand-mid); box-shadow: 0 0 0 3p
   position: absolute; z-index: 20;
   bottom: calc(clamp(52px, 7dvh, 64px) + env(safe-area-inset-bottom));
   display: flex; flex-direction: column;
-  gap: var(--quick-gap); padding: var(--quick-padding);
+  gap: 0; padding: var(--quick-padding);
   border: 1px solid var(--dk-line); border-radius: calc(var(--quick-size) * .28);
   background: #161f2bf2; box-shadow: 0 8px 25px #0f162077;
 }
-.viewer-flow-quick.collapsed { gap: 0; }
 .viewer-flow-quick[data-position="left"] { left: max(6px, env(safe-area-inset-left)); }
 .viewer-flow-quick[data-position="right"] { right: max(6px, env(safe-area-inset-right)); }
+.quick-signal-list {
+  display: flex; flex-direction: column; gap: var(--quick-gap);
+  max-height: calc(var(--quick-size) * 5 + var(--quick-gap) * 4);
+  margin-bottom: var(--quick-gap);
+  overflow: hidden; opacity: 1; transform: translateY(0);
+  transition: max-height .24s cubic-bezier(.2,.75,.25,1), margin-bottom .24s ease, opacity .16s ease, transform .24s ease;
+}
+.viewer-flow-quick.collapsed .quick-signal-list {
+  max-height: 0; margin-bottom: 0; opacity: 0; transform: translateY(10px); pointer-events: none;
+}
 .viewer-flow-quick button { position: relative; width: var(--quick-size); height: var(--quick-size); display: grid; place-items: center; border: 0; border-radius: calc(var(--quick-size) * .22); background: var(--dk-600); color: var(--signal-color, var(--dk-text)); }
 .viewer-flow-quick button:active { transform: translateY(1px); }
 .viewer-flow-quick button:disabled { opacity: .55; }
 .viewer-flow-quick button svg { width: var(--quick-icon-size); height: var(--quick-icon-size); }
 .viewer-flow-quick button i { position: absolute; right: 5px; top: 5px; width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: flowSending .65s ease-in-out infinite alternate; }
 .viewer-flow-quick .quick-signal-toggle { background: var(--dk-500); color: var(--dk-muted); }
-.viewer-flow-quick.open .quick-signal-toggle { margin-top: 1px; border-top: 1px solid var(--dk-line); }
+.viewer-flow-quick .quick-signal-toggle svg { transition: transform .2s ease; }
 @keyframes flowAlert { 0% { opacity: 0; transform: translate(-50%, -10px) scale(.97); } 8%, 86% { opacity: 1; transform: translate(-50%, 0) scale(1); } 100% { opacity: 0; transform: translate(-50%, -5px) scale(.99); } }
 @keyframes flowSending { to { opacity: .25; } }
 /* 뷰어 곡 목록 접기 버튼 — 목록이 상시 보이는 폭에서만 노출된다. */
