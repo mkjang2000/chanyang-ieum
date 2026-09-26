@@ -339,7 +339,7 @@ const sheetQuality = item => {
   return { level: 'low', label: `${item.width}px 낮음` };
 };
 
-function ImageSearch({ initialQuery = '', onClose, onSelect }) {
+export function ImageSearch({ initialQuery = '', onClose, onSelect }) {
   const [query, setQuery] = useState(initialQuery || '');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);

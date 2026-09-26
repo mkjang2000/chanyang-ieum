@@ -591,6 +591,12 @@ export default function App() {
       />}
       {modal?.type === 'viewer' && <DocumentViewer
         conti={modal.conti}
+        currentUser={auth.user}
+        songs={songs}
+        onContiChange={next => {
+          setContis(current => current.map(item => item.id === next.id ? next : item));
+          setModal(current => current?.type === 'viewer' && current.conti.id === next.id ? { ...current, conti: next } : current);
+        }}
         canEditMemo={canEditMemo}
         canEditCues={canManageConti(modal.conti)}
         canSendSignals={canManageConti(modal.conti)}

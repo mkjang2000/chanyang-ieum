@@ -292,3 +292,31 @@ CREATE TABLE IF NOT EXISTS share_links (
   CONSTRAINT fk_share_links_conti FOREIGN KEY (conti_id) REFERENCES contis(id) ON DELETE CASCADE,
   CONSTRAINT fk_share_links_creator FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 곡 ID는 콘티 저장 시 삭제/재생성되므로 FK로 연결하지 않는다.
+-- 비교에 사용한 이미지와 표시 이름은 요청 당시 상태로 보관한다.
+CREATE TABLE IF NOT EXISTS conti_change_requests (
+  id CHAR(36) PRIMARY KEY,
+  conti_id VARCHAR(64) NOT NULL,
+  item_id VARCHAR(64) NOT NULL,
+  requester_id CHAR(36) NULL,
+  requester_name VARCHAR(100) NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  before_image_id CHAR(36) NOT NULL,
+  before_key VARCHAR(32) NOT NULL,
+  before_conti_key VARCHAR(32) NOT NULL,
+  proposed_image_id CHAR(36) NOT NULL,
+  proposed_key VARCHAR(32) NOT NULL,
+  reason TEXT NOT NULL,
+  status ENUM('pending', 'approved', 'rejected', 'cancelled') NOT NULL DEFAULT 'pending',
+  reviewer_name VARCHAR(100) NULL,
+  review_reason TEXT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  reviewed_at DATETIME(3) NULL,
+  KEY idx_change_requests_conti (conti_id, status, created_at),
+  KEY idx_change_requests_requester (requester_id, created_at),
+  CONSTRAINT fk_change_requests_conti FOREIGN KEY (conti_id) REFERENCES contis(id) ON DELETE CASCADE,
+  CONSTRAINT fk_change_requests_requester FOREIGN KEY (requester_id) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_change_requests_before FOREIGN KEY (before_image_id) REFERENCES images(id) ON DELETE RESTRICT,
+  CONSTRAINT fk_change_requests_proposed FOREIGN KEY (proposed_image_id) REFERENCES images(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

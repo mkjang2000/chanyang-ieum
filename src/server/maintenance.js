@@ -30,6 +30,9 @@ export async function countOrphanedLibrary(connection = getPool()) {
       `SELECT COUNT(*) AS count, COALESCE(SUM(i.file_size), 0) AS bytes
          FROM images i
         WHERE NOT EXISTS (
+          SELECT 1 FROM conti_change_requests cr
+           WHERE cr.before_image_id = i.id OR cr.proposed_image_id = i.id
+        ) AND NOT EXISTS (
           SELECT 1 FROM conti_items ci WHERE ci.image_id = i.id
         )
           AND NOT EXISTS (
@@ -105,6 +108,9 @@ export async function runOrphanCleanup({ force = false } = {}) {
       `SELECT i.id, i.file_path AS filePath, i.file_size AS fileSize
          FROM images i
         WHERE NOT EXISTS (
+          SELECT 1 FROM conti_change_requests cr
+           WHERE cr.before_image_id = i.id OR cr.proposed_image_id = i.id
+        ) AND NOT EXISTS (
           SELECT 1 FROM conti_items ci WHERE ci.image_id = i.id
         )
           AND NOT EXISTS (
@@ -116,6 +122,9 @@ export async function runOrphanCleanup({ force = false } = {}) {
       await connection.query(
         `DELETE FROM images
           WHERE NOT EXISTS (
+            SELECT 1 FROM conti_change_requests cr
+             WHERE cr.before_image_id = images.id OR cr.proposed_image_id = images.id
+          ) AND NOT EXISTS (
             SELECT 1 FROM conti_items ci WHERE ci.image_id = images.id
           )
             AND NOT EXISTS (

@@ -1,10 +1,11 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft, ChevronDown, ChevronUp, Download, FileImage, Maximize2, Minimize2,
-  Minus, PanelLeftClose, PanelLeftOpen, Plus, Share2, X, ZoomIn,
+  MessageSquarePlus, Minus, PanelLeftClose, PanelLeftOpen, Plus, Share2, X, ZoomIn,
 } from 'lucide-react';
+import ChangeRequests, { requestApi } from './ChangeRequests.jsx';
 import FlowSignalIcon from './FlowSignalIcon.jsx';
 import SongTransition from './SongTransition.jsx';
 import { ModalShell, ShareModal } from './AppModals.jsx';
@@ -14,9 +15,43 @@ export default function DocumentViewer({
   conti, canEditMemo, canEditCues, canSendSignals, flowSignals = [],
   instrumentPresets = [],
   quickSignalsEnabled = true, quickSignalsPosition = 'left', canShare,
-  onSaveMemo, onRemoteMemo, onSaveCue, onClose,
+  onSaveMemo, onRemoteMemo, onSaveCue, onClose, currentUser, songs = [], onContiChange,
 }) {
   const [page, setPage] = useState(0);
+  const [requestsOpen, setRequestsOpen] = useState(false);
+  const [requests, setRequests] = useState([]);
+  const [requestsLoading, setRequestsLoading] = useState(false);
+  const [requestsError, setRequestsError] = useState('');
+  const requestsButtonRef = useRef(null);
+  const requestSequence = useRef(0);
+  const pendingRequestCount = requests.filter(item => item.status === 'pending').length;
+  const canRequest = currentUser?.role === 'accompanist' || canEditCues;
+  const contiChangeRef = useRef(onContiChange);
+  contiChangeRef.current = onContiChange;
+  const refreshRequests = useCallback(async () => {
+    if (!canRequest) return;
+    const sequence = ++requestSequence.current;
+    setRequestsLoading(true);
+    try {
+      const data = await requestApi(conti.id);
+      if (sequence !== requestSequence.current) return;
+      setRequests(data.requests || []); setRequestsError('');
+    } catch (error) {
+      if (sequence === requestSequence.current) setRequestsError(error.message);
+    } finally {
+      if (sequence === requestSequence.current) setRequestsLoading(false);
+    }
+  }, [conti.id, canRequest]);
+  const refreshRequestsRef = useRef(refreshRequests);
+  refreshRequestsRef.current = refreshRequests;
+  useEffect(() => {
+    refreshRequests();
+    const refresh = () => { if (document.visibilityState === 'visible') refreshRequests(); };
+    const timer = setInterval(refresh, 30000);
+    window.addEventListener('focus', refresh);
+    return () => { clearInterval(timer); window.removeEventListener('focus', refresh); requestSequence.current += 1; };
+  }, [refreshRequests]);
+  const closeRequests = () => { setRequestsOpen(false); requestsButtonRef.current?.focus(); };
   const [editingItemId, setEditingItemId] = useState(null);
   const [memoDraft, setMemoDraft] = useState('');
   const [memoSaving, setMemoSaving] = useState(false);
@@ -76,7 +111,11 @@ export default function DocumentViewer({
     source.onmessage = event => {
       try {
         const message = JSON.parse(event.data);
-        if (message.type === 'presence.snapshot') {
+        if (message.type === 'requests.updated') {
+          refreshRequestsRef.current();
+        } else if (message.type === 'conti.updated' && message.conti) {
+          contiChangeRef.current?.(message.conti);
+        } else if (message.type === 'presence.snapshot') {
           setMemoEditors(message.items || {});
         } else if (message.type === 'memo.snapshot') {
           Object.entries(message.items || {}).forEach(([itemId, memo]) => {
@@ -165,13 +204,14 @@ export default function DocumentViewer({
   }, []);
   useEffect(() => {
     const keys = e => {
+      if (requestsOpen) return;
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if (e.key === 'ArrowRight') scrollToPage(Math.min(conti.pages.length - 1, page + 1));
       if (e.key === 'ArrowLeft') scrollToPage(Math.max(0, page - 1));
     };
     document.addEventListener('keydown',keys);
     return () => document.removeEventListener('keydown',keys);
-  }, [conti.pages.length, page]);
+  }, [conti.pages.length, page, requestsOpen]);
   // Keep the active desktop thumbnail in view while the document itself scrolls continuously.
   useEffect(() => {
     const container = thumbsRef.current;
@@ -360,7 +400,7 @@ export default function DocumentViewer({
     } catch { /* 브라우저가 전체화면 요청을 거부하면 현재 전체 화면형 모달을 유지한다. */ }
   };
   return <>
-  <ModalShell onClose={onClose} viewer modalRef={fullscreenRef}>
+  <ModalShell onClose={requestsOpen ? closeRequests : onClose} viewer modalRef={fullscreenRef}>
     <header className="viewer-header">
       <div className="viewer-title">
         <button onClick={onClose} aria-label="닫기"><ArrowLeft/></button>
@@ -391,6 +431,15 @@ export default function DocumentViewer({
           </div>}
         </div>
         {canShare && <button title="콘티 공유" className="viewer-share-button" onClick={() => setShareOpen(true)}><Share2/></button>}
+        {canRequest && <button
+          ref={requestsButtonRef}
+          className="viewer-request-button"
+          title={pendingRequestCount ? `변경 요청 · 승인 대기 ${pendingRequestCount}건` : '변경 요청'}
+          aria-label={pendingRequestCount ? `변경 요청 · 승인 대기 ${pendingRequestCount}건` : '변경 요청'}
+          aria-haspopup="dialog"
+          aria-expanded={requestsOpen}
+          onClick={() => { setRequestsOpen(true); refreshRequests(); }}
+        ><MessageSquarePlus/>{pendingRequestCount > 0 && <b aria-hidden="true">{pendingRequestCount > 99 ? '99+' : pendingRequestCount}</b>}</button>}
         <button title={isFullscreen ? '전체화면 종료' : '전체화면'} onClick={toggleFullscreen}>{isFullscreen ? <Minimize2/> : <Maximize2/>}</button>
         <button onClick={onClose} className="viewer-desktop-only" aria-label="닫기"><X/></button>
       </div>
@@ -507,6 +556,11 @@ export default function DocumentViewer({
         <em>{page + 1} / {conti.pages.length}</em>
       </div>
     </div>
+    {requestsOpen && <ChangeRequests
+      conti={conti} currentUser={currentUser} songs={songs} initialItemId={active.id}
+      requests={requests} loading={requestsLoading} loadError={requestsError}
+      onRefresh={refreshRequests} onContiChange={onContiChange} onClose={closeRequests}
+    />}
   </ModalShell>
   {shareOpen && <ShareModal conti={conti} onClose={() => setShareOpen(false)}/>}
   </>;
