@@ -2,6 +2,10 @@ import { createHash, randomBytes, randomUUID, scrypt as scryptCallback, timingSa
 import { promisify } from 'node:util';
 import { getPool, withTransaction } from './db.js';
 import { LoginBusyError, withLoginSlot } from './loginGate.js';
+import { getLoginRecordLimit } from './config.js';
+import {
+  clearLoginAttemptsForUser, consumeLoginAttempt, LoginRateLimitError,
+} from './loginRateLimit.js';
 
 const scrypt = promisify(scryptCallback);
 const SESSION_COOKIE = 'muse_session';
@@ -11,6 +15,8 @@ const PASSWORD_MIN_LENGTH = 8;
 const USERNAME_PATTERN = /^[a-z0-9._-]{3,32}$/;
 const VALID_ROLES = new Set(['admin', 'leader', 'accompanist', 'member']);
 const LOGIN_RECORD_DAYS = 180;
+const LOGIN_RECORD_CLEANUP_INTERVAL = 60 * 60 * 1000;
+let nextLoginRecordCleanupAt = 0;
 
 export class AuthError extends Error {
   constructor(message, status = 401) {
@@ -44,9 +50,20 @@ async function recordLogin(request, { userId = null, username = '', success = fa
         String(request.headers.get('user-agent') || '').slice(0, 500),
       ],
     );
-    await getPool().query(
-      `DELETE FROM login_records WHERE created_at < DATE_SUB(CURRENT_TIMESTAMP(3), INTERVAL ${LOGIN_RECORD_DAYS} DAY)`,
-    );
+    const now = Date.now();
+    if (now >= nextLoginRecordCleanupAt) {
+      nextLoginRecordCleanupAt = now + LOGIN_RECORD_CLEANUP_INTERVAL;
+      await getPool().query(
+        `DELETE FROM login_records WHERE created_at < DATE_SUB(CURRENT_TIMESTAMP(3), INTERVAL ${LOGIN_RECORD_DAYS} DAY)`,
+      );
+      const [[countRow]] = await getPool().query('SELECT COUNT(*) AS count FROM login_records');
+      const excess = Math.max(0, Number(countRow.count || 0) - getLoginRecordLimit());
+      if (excess) {
+        // LIMIT은 계산된 정수만 보간한다. mysql2/MariaDB 조합에 따른 LIMIT 바인딩 차이를 피한다.
+        // 한 번에 너무 많은 행을 지워 로그인 요청이 오래 잠기지 않도록 시간당 1만 건씩 줄인다.
+        await getPool().query(`DELETE FROM login_records ORDER BY id ASC LIMIT ${Math.min(excess, 10_000)}`);
+      }
+    }
   } catch (error) {
     // 기록 기능 장애가 실제 로그인을 막아서는 안 된다.
     console.error('로그인 기록을 저장하지 못했습니다.', error);
@@ -216,6 +233,7 @@ export async function setupFirstAdmin(request, input) {
 
 export async function login(request, input) {
   const username = normalizeUsername(input.username);
+  consumeLoginAttempt(username);
   const [rows] = await getPool().query(
     `SELECT id, username, display_name AS displayName, password_hash AS passwordHash, role, active
        FROM users WHERE username = ? LIMIT 1`,
@@ -234,6 +252,7 @@ export async function login(request, input) {
   await getPool().query('UPDATE users SET last_login_at = CURRENT_TIMESTAMP(3) WHERE id = ?', [account.id]);
   const setCookie = await createSession(request, account.id);
   await recordLogin(request, { userId: account.id, username, success: true });
+  clearLoginAttemptsForUser(username);
   return { user: publicUser(account), setCookie };
 }
 
@@ -367,6 +386,12 @@ export function authErrorResponse(error, fallback = '요청을 처리하지 못�
     return Response.json({ message: error.message }, {
       status: error.status,
       headers: { 'Retry-After': '5' },
+    });
+  }
+  if (error instanceof LoginRateLimitError) {
+    return Response.json({ message: error.message }, {
+      status: error.status,
+      headers: { 'Retry-After': String(error.retryAfter) },
     });
   }
   const status = error instanceof AuthError ? error.status : 500;

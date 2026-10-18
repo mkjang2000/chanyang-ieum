@@ -405,6 +405,8 @@ export default function App() {
         startInstrument: saved.startInstrument,
         startInstrumentLabel: saved.startInstrumentLabel,
         transitionMode: saved.transitionMode,
+        bpm: saved.bpm,
+        timeSignature: saved.timeSignature,
       } : page),
     };
     setContis(current => current.map(applyCue));

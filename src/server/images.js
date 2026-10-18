@@ -84,7 +84,7 @@ export function isPrivateAddress(address) {
     || a >= 224;
 }
 
-async function assertPublicUrl(url) {
+export async function assertPublicUrl(url) {
   // 구형 다음 호스트는 HTTPS 를 지원하지 않아 http 를 허용해야 저장할 수 있다.
   const httpAllowed = !isHttpsOnlyHost(url.hostname) && isProxyableImageHost(url.hostname);
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && httpAllowed)) {

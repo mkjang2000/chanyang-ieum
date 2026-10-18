@@ -52,3 +52,27 @@ export function getLoginQueueLimit() {
   if (!Number.isInteger(value) || value < 1) return 50;
   return Math.min(1000, value);
 }
+
+export function getLoginRateWindowMs() {
+  const seconds = Number(process.env.LOGIN_RATE_WINDOW_SECONDS);
+  if (!Number.isInteger(seconds) || seconds < 10) return 300_000;
+  return Math.min(3600, seconds) * 1000;
+}
+
+export function getLoginGlobalLimit() {
+  const value = Number(process.env.LOGIN_RATE_GLOBAL_LIMIT);
+  if (!Number.isInteger(value) || value < 10) return 300;
+  return Math.min(10_000, value);
+}
+
+export function getLoginUserLimit() {
+  const value = Number(process.env.LOGIN_RATE_USER_LIMIT);
+  if (!Number.isInteger(value) || value < 3) return 20;
+  return Math.min(1000, value);
+}
+
+export function getLoginRecordLimit() {
+  const value = Number(process.env.LOGIN_RECORD_MAX_ROWS);
+  if (!Number.isInteger(value) || value < 1000) return 100_000;
+  return Math.min(1_000_000, value);
+}

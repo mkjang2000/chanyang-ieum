@@ -1,5 +1,6 @@
 import { authErrorResponse, requireUser } from '../../../src/server/auth.js';
 import { getDaumSourceReferer } from '../../../src/server/externalImageUrls.js';
+import { assertPublicUrl } from '../../../src/server/images.js';
 
 const NAVER_BLOG_HOSTS = new Set(['blog.naver.com', 'm.blog.naver.com']);
 const NAVER_IMAGE_HOSTS = new Set([
@@ -39,6 +40,47 @@ const SAFE_IMAGE_TYPES = new Set([
   'image/bmp',
 ]);
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
+const MAX_PROBE_BYTES = 512 * 1024;
+const MAX_BLOG_HTML_BYTES = 2 * 1024 * 1024;
+const MAX_REDIRECTS = 3;
+
+async function readLimitedBody(response, maximum) {
+  const declared = Number(response.headers.get('content-length')) || 0;
+  if (declared > maximum) throw new Error('Remote response is too large');
+  if (!response.body) return Buffer.alloc(0);
+  const chunks = [];
+  let total = 0;
+  const reader = response.body.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maximum) {
+        await reader.cancel('response too large').catch(() => {});
+        throw new Error('Remote response is too large');
+      }
+      chunks.push(Buffer.from(value));
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return Buffer.concat(chunks, total);
+}
+
+async function fetchPublicUrl(initialUrl, options = {}, redirectCount = 0) {
+  const url = initialUrl instanceof URL ? initialUrl : new URL(initialUrl);
+  await assertPublicUrl(url);
+  const response = await fetch(url, { ...options, redirect: 'manual' });
+  if (response.status >= 300 && response.status < 400) {
+    if (redirectCount >= MAX_REDIRECTS) throw new Error('Remote image redirected too many times');
+    const location = response.headers.get('location');
+    if (!location) throw new Error('Remote redirect has no location');
+    response.body?.cancel().catch(() => {});
+    return fetchPublicUrl(new URL(location, url), options, redirectCount + 1);
+  }
+  return response;
+}
 
 const decodeHtml = (value = '') => value
   .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
@@ -71,7 +113,7 @@ const getProxyPath = (url, sourceUrl = '') => {
    빠르고 성공률이 높다. 측정상 966px 축소본의 대부분이 2000~3000px 로 복구된다. */
 const probeOriginalBySize = async url => {
   try {
-    const response = await fetch(url.toString(), {
+    const response = await fetchPublicUrl(url, {
       method: 'GET',
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; ChanyangIeum/1.0)',
@@ -84,7 +126,7 @@ const probeOriginalBySize = async url => {
     if (!response.ok && response.status !== 206) return null;
     const type = (response.headers.get('content-type') || '').split(';')[0].toLowerCase();
     if (!SAFE_IMAGE_TYPES.has(type)) return null;
-    const buffer = Buffer.from(await response.arrayBuffer());
+    const buffer = await readLimitedBody(response, MAX_PROBE_BYTES);
     const { default: imageSize } = await import('image-size');
     const size = imageSize(buffer);
     if (!size?.width || !size?.height) return null;
@@ -213,26 +255,26 @@ export async function GET(request) {
     const target = isHttpsOnlyHost(imageUrl.hostname)
       ? useHttps(imageUrl.toString())
       : imageUrl.toString();
-    const response = await fetch(target, {
+    const response = await fetchPublicUrl(target, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ChanyangIeum/1.0)', Referer: referer },
       cache: 'no-store',
       signal: AbortSignal.timeout(8000),
     });
     const contentType = response.headers.get('content-type') || '';
-    const contentLength = Number(response.headers.get('content-length')) || 0;
     if (!response.ok || !SAFE_IMAGE_TYPES.has(contentType.split(';')[0].toLowerCase())) {
       throw new Error(`Remote image returned ${response.status}`);
     }
-    if (contentLength > MAX_IMAGE_BYTES) throw new Error('Remote image is too large');
+    const buffer = await readLimitedBody(response, MAX_IMAGE_BYTES);
+    if (!buffer.length) throw new Error('Remote image is empty');
 
     const headers = new Headers({
       'Content-Type': contentType,
+      'Content-Length': String(buffer.length),
       'Cache-Control': 'public, max-age=86400',
       'Content-Security-Policy': "default-src 'none'",
       'X-Content-Type-Options': 'nosniff',
     });
-    if (contentLength) headers.set('Content-Length', String(contentLength));
-    return new Response(response.body, { headers });
+    return new Response(buffer, { headers });
   } catch (error) {
     console.error('Original image proxy failed', error.message);
     return Response.json({ message: '원본 이미지를 불러오지 못했어요.' }, { status: 502 });
@@ -296,13 +338,13 @@ export async function POST(request) {
     const blogUrl = parseNaverBlogUrl(body.sourceUrl);
     if (blogUrl) {
       try {
-        const response = await fetch(blogUrl, {
+        const response = await fetchPublicUrl(blogUrl, {
           headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ChanyangIeum/1.0)' },
           cache: 'no-store',
           signal: AbortSignal.timeout(5000),
         });
         if (response.ok) {
-          const images = extractNaverImages(await response.text());
+          const images = extractNaverImages((await readLimitedBody(response, MAX_BLOG_HTML_BYTES)).toString('utf8'));
           const matched = findMatchingImage(images, currentImage, currentWidth, currentHeight);
           if (matched?.width && matched?.height) {
             const fromHtml = { url: getOriginalFileUrl(matched.url), width: matched.width, height: matched.height };

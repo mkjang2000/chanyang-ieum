@@ -1,5 +1,7 @@
 "use client";
 
+import TempoFields from './TempoFields.jsx';
+import { resolveTempo } from './metronome.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -227,6 +229,7 @@ export default function ContiEditor({
                   key={page.id}
                   page={page}
                   index={index}
+                  tempo={resolveTempo(form.pages, index)}
                   instrumentPresets={instrumentPresets}
                   onUpdate={patch => updatePage(index, patch)}
                   onDelete={() => deletePage(index)}
@@ -300,7 +303,7 @@ export default function ContiEditor({
   </ModalShell>;
 }
 
-function SortablePageEditor({ page, index, instrumentPresets, onUpdate, onDelete, onSearch, onUpload }) {
+function SortablePageEditor({ page, index, tempo, instrumentPresets, onUpdate, onDelete, onSearch, onUpload }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: page.id });
   return <div
     ref={setNodeRef}
@@ -323,6 +326,7 @@ function SortablePageEditor({ page, index, instrumentPresets, onUpdate, onDelete
         <select aria-label="시작 악기" value={page.startInstrument || ''} onChange={event => onUpdate({ startInstrument: event.target.value })}><option value="">시작 악기 미정</option>{selectableInstruments(instrumentPresets, page.startInstrument).map(instrument => <option key={instrument.id} value={instrument.id}>{instrument.label} 시작</option>)}</select>
         <select aria-label="다음 곡 전환" value={page.transitionMode || ''} onChange={event => onUpdate({ transitionMode: event.target.value })}><option value="">전환 미정</option><option value="continue">이어서 넘어가기</option><option value="stop">끊고 넘어가기</option></select>
       </div>
+      <TempoFields value={page} onChange={onUpdate} inherited={tempo.inherited} inheritedBpm={tempo.bpm}/>
       <input className="page-memo-input" placeholder="이 악보에서 전달할 메모 (선택)" value={page.memo || ''} onChange={event => onUpdate({ memo: event.target.value })}/>
     </div>
     <button type="button" className="delete-button" onClick={onDelete}><Trash2 size={17}/></button>

@@ -1,3 +1,4 @@
+import { normalizeTempo } from '../metronome.js';
 import { getPool, normalizeSongTitle, withTransaction } from './db.js';
 import { persistPreparedImage, prepareImage } from './images.js';
 import { AuthError } from './auth.js';
@@ -39,7 +40,7 @@ export async function listContis(connection = getPool()) {
             ci.key_name AS contiKey, i.key_name AS imageKey, i.key_source AS keySource,
             ci.memo, ci.start_instrument AS startInstrument,
             ip.name AS startInstrumentLabel,
-            ci.transition_mode AS transitionMode,
+            ci.transition_mode AS transitionMode, ci.bpm, ci.time_signature AS timeSignature,
             i.width, i.height, i.source_url AS sourceUrl, i.source_type AS sourceType
        FROM conti_items ci
        JOIN images i ON i.id = ci.image_id
@@ -233,6 +234,8 @@ export async function saveConti(conti, actor) {
   if (conti.mode === 'regular') await assertServicePresetExists(String(conti.serviceType || ''));
   await assertInstrumentPresetsExist(conti.pages.map(page => page.startInstrument));
 
+  let tempos;
+  try { tempos = conti.pages.map(normalizeTempo); } catch (error) { throw new AuthError(error.message, 400); }
   const contiId = String(conti.id).slice(0, 64);
   const existing = await findContiOwnership(contiId);
   if (existing) assertContiOwner(existing, actor);
@@ -276,8 +279,8 @@ export async function saveConti(conti, actor) {
       await connection.query(
         `INSERT INTO conti_items
           (id, conti_id, song_id, image_id, position, title, key_name, memo,
-           start_instrument, transition_mode)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           start_instrument, transition_mode, bpm, time_signature)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           String(page.id || `${conti.id}-page-${index + 1}`).slice(0, 64),
           contiId,
@@ -289,6 +292,8 @@ export async function saveConti(conti, actor) {
           String(page.memo || ''),
           String(page.startInstrument || '').slice(0, 64),
           ['stop', 'continue'].includes(page.transitionMode) ? page.transitionMode : '',
+          tempos[index].bpm,
+          tempos[index].timeSignature,
         ],
       );
       // 사용자가 직접 적은 Key 는 악보 자체의 정보로 승격시킨다.
@@ -343,6 +348,8 @@ export async function updateContiItemMemo(contiId, itemId, memo) {
 }
 
 export async function updateContiItemCue(contiId, itemId, input = {}) {
+  let tempo;
+  try { tempo = normalizeTempo(input); } catch (error) { throw new AuthError(error.message, 400); }
   const startInstrument = String(input.startInstrument || '');
   const transitionMode = String(input.transitionMode || '');
   const instrument = startInstrument ? await getInstrumentPreset(startInstrument) : null;
@@ -351,12 +358,14 @@ export async function updateContiItemCue(contiId, itemId, input = {}) {
     `UPDATE conti_items ci
        JOIN contis c ON c.id = ci.conti_id
         SET ci.start_instrument = ?, ci.transition_mode = ?,
+            ci.bpm = IF(?, ?, ci.bpm), ci.time_signature = IF(?, ?, ci.time_signature),
             ci.updated_at = CURRENT_TIMESTAMP(3), c.updated_at = CURRENT_TIMESTAMP(3)
       WHERE ci.id = ? AND ci.conti_id = ?`,
-    [startInstrument, transitionMode, itemId, contiId],
+    [startInstrument, transitionMode, Object.hasOwn(input, 'bpm'), tempo.bpm, Object.hasOwn(input, 'timeSignature'), tempo.timeSignature, itemId, contiId],
   );
   if (!result.affectedRows) throw new Error('수정할 악보를 찾을 수 없습니다.');
-  return { id: itemId, contiId, startInstrument, startInstrumentLabel: instrument?.label || '', transitionMode };
+  const [[stored]] = await getPool().query('SELECT bpm, time_signature AS timeSignature FROM conti_items WHERE id = ? AND conti_id = ?', [itemId, contiId]);
+  return { id: itemId, contiId, startInstrument, startInstrumentLabel: instrument?.label || '', transitionMode, ...stored };
 }
 
 export async function findStoredImages(query, limit = 12) {

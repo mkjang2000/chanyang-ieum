@@ -1,5 +1,7 @@
 "use client";
 
+import Metronome from './Metronome.jsx';
+import { activePageAt, resolveTempo } from './metronome.js';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Download, FileWarning, Maximize2, Minimize2, Minus, Music2, ZoomIn,
@@ -50,7 +52,8 @@ export default function SharePage() {
   return <SharedDocumentViewer conti={state.conti} share={state.share} token={token}/>;
 }
 
-function SharedDocumentViewer({ conti, share, token }) {
+function SharedDocumentViewer({ conti: initialConti, share, token }) {
+  const [conti, setConti] = useState(initialConti);
   const [page, setPage] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [flowSignal, setFlowSignal] = useState(null);
@@ -79,6 +82,11 @@ function SharedDocumentViewer({ conti, share, token }) {
     source.onmessage = event => {
       try {
         const message = JSON.parse(event.data);
+        if (message.type === 'cue.updated' || message.type === 'cue.snapshot') {
+          const updates = message.type === 'cue.snapshot' ? message.items : [message.cue];
+          setConti(current => ({ ...current, pages: current.pages.map(item => ({ ...item, ...(updates || []).find(cue => cue.id === item.id) })) }));
+          return;
+        }
         if (message.type !== 'flow.signal' || !message.signal || !message.label
           || !message.id || lastFlowSignalIdRef.current === message.id) return;
         lastFlowSignalIdRef.current = message.id;
@@ -159,18 +167,20 @@ function SharedDocumentViewer({ conti, share, token }) {
       scrollFrameRef.current = null;
       const stage = stageRef.current;
       if (!stage) return;
-      const stageRect = stage.getBoundingClientRect();
-      let bestIndex = 0;
-      let bestVisible = -1;
-      pageRefs.current.forEach((element, index) => {
-        if (!element) return;
-        const rect = element.getBoundingClientRect();
-        const visible = Math.max(0, Math.min(rect.bottom, stageRect.bottom) - Math.max(rect.top, stageRect.top));
-        if (visible > bestVisible) { bestVisible = visible; bestIndex = index; }
-      });
+      const bestIndex = activePageAt(
+        pageRefs.current.map(element => element?.querySelector('.sheet-image')?.getBoundingClientRect()),
+        stage.getBoundingClientRect().top,
+      );
       setPage(current => current === bestIndex ? current : bestIndex);
     });
   };
+  useEffect(() => {
+    const observer = new ResizeObserver(updateActivePage);
+    if (stageRef.current) observer.observe(stageRef.current);
+    pageRefs.current.forEach(element => { if (element) observer.observe(element); });
+    updateActivePage();
+    return () => observer.disconnect();
+  }, [conti.id, conti.pages.length]);
   const onTouchStart = event => {
     if (event.touches.length !== 2 || !stageRef.current) return;
     const [a, b] = event.touches;
@@ -254,6 +264,7 @@ function SharedDocumentViewer({ conti, share, token }) {
         <button title={isFullscreen ? '전체화면 종료' : '전체화면'} onClick={toggleFullscreen}>{isFullscreen ? <Minimize2/> : <Maximize2/>}</button>
       </div>
     </header>
+    <Metronome pages={conti.pages} page={page}/>
 
     <div className="viewer-body">
       {flowSignal && <div key={flowSignal.id} className="viewer-flow-alert" style={{ '--signal-color': flowSignal.color }} role="alert" aria-live="assertive">
@@ -282,6 +293,7 @@ function SharedDocumentViewer({ conti, share, token }) {
                 {item.key && <b className="sheet-key">{item.key}<small>KEY</small></b>}
                 {item.startInstrument && <span>{item.startInstrumentLabel || item.startInstrument} 시작</span>}
                 {item.transitionMode && <span>{item.transitionMode === 'stop' ? '끊고' : '이어서'}</span>}
+                {resolveTempo(conti.pages, index).bpm && <span>{resolveTempo(conti.pages, index).bpm} BPM</span>}
               </div>
               <div className="sheet-heading-copy"><h1>{item.title}</h1>{conti.leader && <span>인도 {conti.leader}</span>}</div>
             </div>

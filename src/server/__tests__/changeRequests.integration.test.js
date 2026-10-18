@@ -26,7 +26,7 @@ test('변경 요청 DB 통합: 동시 처리, 원본 보호, 권한, 이력 보�
     Object.assign(process.env, { DB_SOCKET: socketPath, DB_USER: 'muse_change_test', DB_PASSWORD: 'temporary-test-only', DB_NAME: database, IMAGE_STORAGE_DIR: storage });
     const db = await import('../db.js'); pool = db.getPool();
     const { createChangeRequest, listChangeRequests, reviewChangeRequest } = await import('../changeRequests.js');
-    const { saveConti, listContis } = await import('../repository.js');
+    const { saveConti, listContis, updateContiItemCue } = await import('../repository.js');
     const { runOrphanCleanup } = await import('../maintenance.js');
     const leader = { id: randomUUID(), role: 'leader', displayName: '테스트 인도자' };
     const player = { id: randomUUID(), role: 'accompanist', displayName: '테스트 반주자' };
@@ -34,8 +34,23 @@ test('변경 요청 DB 통합: 동시 처리, 원본 보호, 권한, 이력 보�
     const admin = { id: randomUUID(), role: 'admin', displayName: '테스트 관리자' };
     for (const user of [leader, player, other, admin]) await pool.query('INSERT INTO users (id, username, display_name, password_hash, role) VALUES (?, ?, ?, ?, ?)', [user.id, user.id, user.displayName, 'unused', user.role]);
     const png = async color => `data:image/png;base64,${(await sharp({ create: { width: 40, height: 60, channels: 3, background: color } }).png().toBuffer()).toString('base64')}`;
-    const conti = await saveConti({ id: 'test-conti', title: '테스트 콘티', date: '2026-09-27', mode: 'regular', serviceType: 'sunday-morning', pages: [{ id: 'test-item', title: '테스트 곡', key: 'G', image: await png('white'), memo: '유지할 메모', startInstrument: 'piano', transitionMode: 'continue' }] }, leader);
+    const conti = await saveConti({ id: 'test-conti', title: '테스트 콘티', date: '2026-09-27', mode: 'regular', serviceType: 'sunday-morning', pages: [{ id: 'test-item', title: '테스트 곡', key: 'G', image: await png('white'), memo: '유지할 메모', startInstrument: 'piano', transitionMode: 'continue', bpm: 120, timeSignature: '4/4' }] }, leader);
     const original = conti.pages[0];
+    await t.test('BPM과 박자 저장, 공유 조회, 부분 진행 설정에서 보존', async () => {
+      const { getContiForExport } = await import('../exports.js');
+      const { loadCueSnapshot } = await import('../realtime.js');
+      assert.equal(original.bpm, 120);
+      assert.equal(original.timeSignature, '4/4');
+      const cue = await updateContiItemCue(conti.id, original.id, { startInstrument: 'piano', transitionMode: 'continue' });
+      assert.equal(cue.bpm, 120);
+      assert.equal(cue.timeSignature, '4/4');
+      const changed = await updateContiItemCue(conti.id, original.id, { startInstrument: 'piano', transitionMode: 'continue', bpm: 132, timeSignature: '6/8' });
+      assert.equal(changed.bpm, 132);
+      assert.equal((await getContiForExport(conti.id)).pages[0].timeSignature, '6/8');
+      assert.equal((await loadCueSnapshot(conti.id))[0].bpm, 132);
+      await assert.rejects(() => updateContiItemCue(conti.id, original.id, { bpm: 0 }), error => error.status === 400);
+      await updateContiItemCue(conti.id, original.id, { startInstrument: 'piano', transitionMode: 'continue', bpm: 120, timeSignature: '4/4' });
+    });
     const input = { contiId: conti.id, itemId: original.id, title: original.title, beforeImageId: original.imageId, beforeKey: original.key, beforeContiKey: original.contiKey, image: await png('yellow'), key: 'A', reason: '편곡 변경' };
     const state = async () => (await listContis())[0].pages[0];
     const fail = (fn, status) => assert.rejects(fn, error => error.status === status);
@@ -59,6 +74,7 @@ test('변경 요청 DB 통합: 동시 처리, 원본 보호, 권한, 이력 보�
       const page = await state();
       assert.equal(page.imageId, pending.proposedImageId); assert.equal(page.key, 'A');
       assert.equal(page.memo, original.memo); assert.equal(page.startInstrument, 'piano'); assert.equal(page.transitionMode, 'continue');
+      assert.equal(page.bpm, 120); assert.equal(page.timeSignature, '4/4');
       await fail(() => reviewChangeRequest({ contiId: conti.id, id: pending.id, action: 'reject' }, leader), 409);
       const [rows] = await pool.query('SELECT key_name FROM images WHERE id = ?', [original.imageId]);
       assert.equal(rows[0].key_name, 'G');

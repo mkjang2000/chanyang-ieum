@@ -1,11 +1,12 @@
-import { createContiEventStream } from '../../../../src/server/realtime.js';
+import { createContiEventStream, loadCueSnapshot } from '../../../../src/server/realtime.js';
 import { getValidShare, shareErrorResponse } from '../../../../src/server/shares.js';
 
 export async function GET(request) {
   const token = new URL(request.url).searchParams.get('token');
   try {
     const share = await getValidShare(token);
-    return new Response(createContiEventStream(share.contiId, {}, { includeSnapshots: false }), {
+    const cueSnapshot = await loadCueSnapshot(share.contiId);
+    return new Response(createContiEventStream(share.contiId, {}, { includeSnapshots: false, cueSnapshot }), {
       headers: {
         'Content-Type': 'text/event-stream; charset=utf-8',
         'Cache-Control': 'private, no-cache, no-transform',

@@ -50,7 +50,7 @@ export async function getContiForExport(id, connection = getPool()) {
             COALESCE(NULLIF(ci.key_name, ''), i.key_name) AS \`key\`,
             ci.memo, ci.start_instrument AS startInstrument,
             ip.name AS startInstrumentLabel,
-            ci.transition_mode AS transitionMode,
+            ci.transition_mode AS transitionMode, ci.bpm, ci.time_signature AS timeSignature,
             i.mime_type AS mime, i.file_size AS fileSize
        FROM conti_items ci
        JOIN images i ON i.id = ci.image_id

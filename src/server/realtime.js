@@ -86,6 +86,16 @@ export async function loadMemoSnapshot(contiId) {
   return Object.fromEntries(rows.map(row => [row.id, row.memo || '']));
 }
 
+export async function loadCueSnapshot(contiId) {
+  const [rows] = await getPool().query(
+    `SELECT ci.id, ci.start_instrument AS startInstrument, ip.name AS startInstrumentLabel,
+            ci.transition_mode AS transitionMode, ci.bpm, ci.time_signature AS timeSignature
+       FROM conti_items ci LEFT JOIN instrument_presets ip ON ip.id = ci.start_instrument
+      WHERE ci.conti_id = ? ORDER BY ci.position`, [contiId],
+  );
+  return rows;
+}
+
 export async function setEditingPresence(contiId, itemId, user, clientId, active) {
   const cleanClientId = String(clientId || '').slice(0, 64);
   if (!contiId || !itemId || !cleanClientId) throw new Error('편집 상태 정보가 올바르지 않습니다.');
@@ -149,7 +159,7 @@ export function publishFlowSignal(contiId, signal, user) {
   return payload;
 }
 
-export function createContiEventStream(contiId, memoSnapshot = {}, { includeSnapshots = true } = {}) {
+export function createContiEventStream(contiId, memoSnapshot = {}, { includeSnapshots = true, cueSnapshot = [] } = {}) {
   let listener;
   return new ReadableStream({
     start(controller) {
@@ -164,6 +174,7 @@ export function createContiEventStream(contiId, memoSnapshot = {}, { includeSnap
       listener = { controller, close };
       listeners.add(listener);
       subscribers.set(contiId, listeners);
+      send(controller, { type: 'cue.snapshot', items: cueSnapshot });
       if (includeSnapshots) {
         send(controller, { type: 'presence.snapshot', items: presenceSnapshot(contiId) });
         send(controller, { type: 'memo.snapshot', items: memoSnapshot });

@@ -41,6 +41,7 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/database/schema.sql ./database/schema.sql
 COPY --from=builder /app/scripts/start.mjs /app/scripts/migrate.mjs ./scripts/
 COPY --from=builder /app/src/server/config.js ./src/server/config.js
+COPY --from=builder /app/src/server/httpSecurity.js ./src/server/httpSecurity.js
 COPY --chown=node:node --chmod=755 scripts/container-entrypoint.sh ./scripts/container-entrypoint.sh
 
 USER node

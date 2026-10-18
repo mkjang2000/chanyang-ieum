@@ -1,5 +1,8 @@
 "use client";
 
+import TempoFields from './TempoFields.jsx';
+import Metronome from './Metronome.jsx';
+import { activePageAt, resolveTempo } from './metronome.js';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft, ChevronDown, ChevronUp, Download, FileImage, Maximize2, Minimize2,
@@ -17,6 +20,10 @@ export default function DocumentViewer({
   quickSignalsEnabled = true, quickSignalsPosition = 'left', canShare,
   onSaveMemo, onRemoteMemo, onSaveCue, onClose, currentUser, songs = [], onContiChange,
 }) {
+  const latestContiRef = useRef(conti);
+  latestContiRef.current = conti;
+  const [tempoItemId, setTempoItemId] = useState(null);
+  const [tempoDraft, setTempoDraft] = useState({});
   const [page, setPage] = useState(0);
   const [requestsOpen, setRequestsOpen] = useState(false);
   const [requests, setRequests] = useState([]);
@@ -111,9 +118,16 @@ export default function DocumentViewer({
     source.onmessage = event => {
       try {
         const message = JSON.parse(event.data);
-        if (message.type === 'requests.updated') {
+        if (message.type === 'cue.updated' || message.type === 'cue.snapshot') {
+          const updates = message.type === 'cue.snapshot' ? message.items : [message.cue];
+          const latest = latestContiRef.current;
+          const next = { ...latest, pages: latest.pages.map(item => ({ ...item, ...(updates || []).find(cue => cue.id === item.id) })) };
+          latestContiRef.current = next;
+          contiChangeRef.current?.(next);
+        } else if (message.type === 'requests.updated') {
           refreshRequestsRef.current();
         } else if (message.type === 'conti.updated' && message.conti) {
+          latestContiRef.current = message.conti;
           contiChangeRef.current?.(message.conti);
         } else if (message.type === 'presence.snapshot') {
           setMemoEditors(message.items || {});
@@ -204,14 +218,14 @@ export default function DocumentViewer({
   }, []);
   useEffect(() => {
     const keys = e => {
-      if (requestsOpen) return;
+      if (requestsOpen || tempoItemId) return;
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if (e.key === 'ArrowRight') scrollToPage(Math.min(conti.pages.length - 1, page + 1));
       if (e.key === 'ArrowLeft') scrollToPage(Math.max(0, page - 1));
     };
     document.addEventListener('keydown',keys);
     return () => document.removeEventListener('keydown',keys);
-  }, [conti.pages.length, page, requestsOpen]);
+  }, [conti.pages.length, page, requestsOpen, tempoItemId]);
   // Keep the active desktop thumbnail in view while the document itself scrolls continuously.
   useEffect(() => {
     const container = thumbsRef.current;
@@ -249,18 +263,20 @@ export default function DocumentViewer({
       scrollFrameRef.current = null;
       const stage = stageRef.current;
       if (!stage) return;
-      const stageRect = stage.getBoundingClientRect();
-      let bestIndex = 0;
-      let bestVisible = -1;
-      pageRefs.current.forEach((element, index) => {
-        if (!element) return;
-        const rect = element.getBoundingClientRect();
-        const visible = Math.max(0, Math.min(rect.bottom, stageRect.bottom) - Math.max(rect.top, stageRect.top));
-        if (visible > bestVisible) { bestVisible = visible; bestIndex = index; }
-      });
+      const bestIndex = activePageAt(
+        pageRefs.current.map(element => element?.querySelector('.sheet-image')?.getBoundingClientRect()),
+        stage.getBoundingClientRect().top,
+      );
       setPage(current => current === bestIndex ? current : bestIndex);
     });
   };
+  useEffect(() => {
+    const observer = new ResizeObserver(updateActivePage);
+    if (stageRef.current) observer.observe(stageRef.current);
+    pageRefs.current.forEach(element => { if (element) observer.observe(element); });
+    updateActivePage();
+    return () => observer.disconnect();
+  }, [conti.id, conti.pages.length]);
   useEffect(() => () => scrollFrameRef.current && cancelAnimationFrame(scrollFrameRef.current), []);
   useEffect(() => () => zoomFrameRef.current && cancelAnimationFrame(zoomFrameRef.current), []);
   useEffect(() => () => pinchScrollFrameRef.current && cancelAnimationFrame(pinchScrollFrameRef.current), []);
@@ -340,8 +356,11 @@ export default function DocumentViewer({
       await onSaveCue(conti.id, item.id, {
         startInstrument: item.startInstrument || '',
         transitionMode: item.transitionMode || '',
+        bpm: item.bpm ?? null,
+        timeSignature: item.timeSignature || '',
         ...patch,
       });
+      setTempoItemId(null);
     } catch (error) {
       setCueError(error.message || '진행 표시를 저장하지 못했어요.');
     } finally {
@@ -400,7 +419,7 @@ export default function DocumentViewer({
     } catch { /* 브라우저가 전체화면 요청을 거부하면 현재 전체 화면형 모달을 유지한다. */ }
   };
   return <>
-  <ModalShell onClose={requestsOpen ? closeRequests : onClose} viewer modalRef={fullscreenRef}>
+  <ModalShell onClose={tempoItemId ? () => setTempoItemId(null) : requestsOpen ? closeRequests : onClose} viewer modalRef={fullscreenRef}>
     <header className="viewer-header">
       <div className="viewer-title">
         <button onClick={onClose} aria-label="닫기"><ArrowLeft/></button>
@@ -444,6 +463,15 @@ export default function DocumentViewer({
         <button onClick={onClose} className="viewer-desktop-only" aria-label="닫기"><X/></button>
       </div>
     </header>
+    <Metronome pages={conti.pages} page={page}/>
+    {tempoItemId && <ModalShell onClose={() => setTempoItemId(null)}>
+      <div className="tempo-modal" role="dialog" aria-modal="true" aria-label="박자와 BPM 설정">
+      <header className="modal-header"><h2>박자와 BPM 설정</h2><button type="button" onClick={() => setTempoItemId(null)} aria-label="닫기"><X/></button></header>
+      <TempoFields value={tempoDraft} disabled={Boolean(cueSaving)} onChange={patch => setTempoDraft(current => ({ ...current, ...patch }))} inherited={resolveTempo(conti.pages, conti.pages.findIndex(item => item.id === tempoItemId)).inherited} inheritedBpm={resolveTempo(conti.pages, conti.pages.findIndex(item => item.id === tempoItemId)).bpm}/>
+      {cueError && <p role="alert">{cueError}</p>}
+      <button type="button" className="primary-button" disabled={Boolean(cueSaving)} onClick={() => { const item = conti.pages.find(item => item.id === tempoItemId); if (item) saveCue(item, tempoDraft); }}>{cueSaving ? '저장 중…' : '저장'}</button>
+      </div>
+    </ModalShell>}
     {canSendSignals && flowSignals.length > 0 && <div className="viewer-flow-controls" aria-label="실시간 진행 알림">
       <span>진행 알림</span>
       <div data-count={flowSignals.length}>{flowSignals.map(({ id, label, shortLabel, icon, color }) => <button
@@ -526,9 +554,11 @@ export default function DocumentViewer({
                 {canEditCues ? <>
                   <select aria-label="시작 악기" disabled={cueSaving === item.id} value={item.startInstrument || ''} onChange={event => saveCue(item, { startInstrument: event.target.value })}><option value="">시작 미정</option>{selectableInstruments(instrumentPresets, item.startInstrument).map(instrument => <option key={instrument.id} value={instrument.id}>{instrument.label} 시작</option>)}</select>
                   <select aria-label="다음 곡 전환" disabled={cueSaving === item.id} value={item.transitionMode || ''} onChange={event => saveCue(item, { transitionMode: event.target.value })}><option value="">전환 미정</option><option value="continue">이어서</option><option value="stop">끊고</option></select>
+                  <button type="button" className="sheet-tempo-button" onClick={() => { setTempoItemId(item.id); setTempoDraft({ bpm: item.bpm ?? null, timeSignature: item.timeSignature || '' }); setCueError(''); }}>{resolveTempo(conti.pages, index).bpm ? `${resolveTempo(conti.pages, index).bpm} BPM` : 'BPM 설정'}</button>
                 </> : <>
                   {item.startInstrument && <span>{instrumentLabel(item.startInstrument, instrumentPresets, item.startInstrumentLabel)} 시작</span>}
                   {item.transitionMode && <span>{item.transitionMode === 'stop' ? '끊고' : '이어서'}</span>}
+                  {resolveTempo(conti.pages, index).bpm && <span>{resolveTempo(conti.pages, index).bpm} BPM</span>}
                 </>}
               </div>
               <div className="sheet-heading-copy"><h1>{item.title}</h1>{conti.leader && <span>인도 {conti.leader}</span>}</div>
